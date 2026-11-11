@@ -63,7 +63,10 @@ h1 { font-size: 22px; margin: 0; }
 .ev { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; display: grid; gap: 8px; }
 .ev-head { display: flex; justify-content: space-between; align-items: center; }
 .ev-head button { background: none; border: 0; color: var(--danger); font-size: 14px; padding: 4px; }
-.ev-bottle { display: grid; grid-template-columns: 1fr 96px; gap: 8px; }
+.ev-bottle { display: grid; grid-template-columns: 1fr 84px 76px; gap: 8px; }
+.amt { display: grid; grid-template-columns: 1fr 150px; gap: 8px; align-items: stretch; }
+.amt .seg label { min-width: 0; }
+.amt .seg span { padding: 10px 4px; }
 .evadd { display: flex; gap: 8px; }
 .evadd button { flex: 1; border: 1px dashed var(--muted); background: none; border-radius: 12px; padding: 11px 4px; font-weight: 600; }
 .card .sides button.done { border-color: var(--line); color: var(--muted); font-weight: 600; }
@@ -195,9 +198,14 @@ textarea { min-height: 70px; resize: vertical; }
       <label><input type="radio" name="b" value="formula"><span>Formula</span></label>
       <label><input type="radio" name="b" value="milk"><span>Breast milk</span></label>
     </div>
-    <label class="f">How many oz?
-      <input type="number" name="oz" inputmode="decimal" min="0.25" max="20" step="0.25" placeholder="e.g. 2.5">
-    </label>
+    <label class="f" for="bottleAmt">How much?</label>
+    <div class="amt">
+      <input type="number" name="amt" id="bottleAmt" inputmode="decimal" min="0" step="any">
+      <div class="seg">
+        <label><input type="radio" name="unit" value="oz"><span>oz</span></label>
+        <label><input type="radio" name="unit" value="ml"><span>ml</span></label>
+      </div>
+    </div>
     <p class="hint" id="bottleHint"></p>
     <div class="actions">
       <button type="button" id="bottleCancel">Cancel</button>
@@ -211,6 +219,9 @@ textarea { min-height: 70px; resize: vertical; }
     <h3>Settings</h3>
     <label class="f">Your name (shown on each entry)
       <input type="text" name="name" placeholder="Mom, Dad…" maxlength="20">
+    </label>
+    <label class="f">Show bottle amounts in
+      <select name="unit"><option value="oz">Ounces (oz)</option><option value="ml">Milliliters (ml)</option></select>
     </label>
     <label class="f">Hours between feeds (counted from the start of the last feed)
       <input type="number" name="feedHours" inputmode="decimal" min="0.5" max="12" step="0.25">
@@ -286,7 +297,14 @@ const cap = s => s[0].toUpperCase() + s.slice(1);
 const live = () => Object.values(entries).filter(e => !e.deleted).sort((a, b) => b.t - a.t);
 const BOTTLE = { formula: 'Formula', milk: 'Breast milk' };
 const SIDE = { left: 'Left', right: 'Right' };
-const fmtOz = n => `${Math.round(n * 100) / 100} oz`;
+// Bottle amounts are stored as entered (`oz` or `ml`) and converted for display to this phone's unit.
+const ML_PER_OZ = 29.5735, UNITS = { oz: 20, ml: 600 }; // unit -> largest sensible bottle
+const unit = () => (UNITS[cfg.unit] ? cfg.unit : 'oz');
+const toMl = v => (v.ml != null ? Number(v.ml) || 0 : (Number(v.oz) || 0) * ML_PER_OZ);
+const fmtMl = ml => (unit() === 'ml' ? `${Math.round(ml)} ml` : `${Math.round(ml / ML_PER_OZ * 100) / 100} oz`);
+const entered = v => (v.ml != null ? { n: v.ml, u: 'ml' } : { n: v.oz, u: 'oz' });
+function setAmt(v, n, u) { delete v.oz; delete v.ml; v[u === 'ml' ? 'ml' : 'oz'] = n; return v; }
+const amtOk = v => { const a = entered(v); return a.n > 0 && a.n <= UNITS[a.u]; };
 const other = side => (side === 'left' ? 'right' : 'left');
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -308,7 +326,7 @@ function setEv(e, ev) { // store events in time order and drop the fields earlie
   for (const k of ['side', 'first', 't2', 'bottle', 'oz', 'formula']) delete n[k];
   return n;
 }
-const evLabel = v => (v.k === 'bottle' ? `${BOTTLE[v.b] || 'Bottle'} ${fmtOz(v.oz || 0)}` : SIDE[v.k] || '?');
+const evLabel = v => (v.k === 'bottle' ? `${BOTTLE[v.b] || 'Bottle'} ${fmtMl(toMl(v))}` : SIDE[v.k] || '?');
 function feedText(e) {
   const ev = events(e);
   if (ev.length < 2) return ev.length ? evLabel(ev[0]) : '?';
@@ -406,10 +424,10 @@ function render() {
     if (type === 'feed') {
       const oz = {};
       all.forEach(e => e.type === 'feed' && events(e).forEach(v => {
-        if (v.k === 'bottle' && v.t > now - DAY && v.t <= now) oz[v.b] = (oz[v.b] || 0) + (Number(v.oz) || 0);
+        if (v.k === 'bottle' && v.t > now - DAY && v.t <= now) oz[v.b] = (oz[v.b] || 0) + toMl(v);
       }));
       const chips = Object.keys(BOTTLE).filter(b => oz[b]).map(b =>
-        `<span class="chip" style="padding-left:9px">${BOTTLE[b]} ${fmtOz(oz[b])}</span>`);
+        `<span class="chip" style="padding-left:9px">${BOTTLE[b]} ${fmtMl(oz[b])}</span>`);
       if (chips.length) extra += `<div class="chips">${chips.join('')}</div>`;
     }
     return `<div class="card ${type}">
@@ -474,7 +492,8 @@ function renderEv() {
       <div class="ev-head"><b>${v.k === 'bottle' ? 'Bottle' : SIDE[v.k] + ' side started'}</b><button type="button" data-evdel="${i}">Remove</button></div>
       ${v.k === 'bottle' ? `<div class="ev-bottle"><select data-f="b">${Object.keys(BOTTLE).map(b =>
         `<option value="${b}"${v.b === b ? ' selected' : ''}>${BOTTLE[b]}</option>`).join('')}</select>
-        <input type="number" data-f="oz" inputmode="decimal" min="0.25" max="20" step="0.25" placeholder="oz" value="${v.oz || ''}"></div>` : ''}
+        <input type="number" data-f="amt" inputmode="decimal" min="0" step="any" value="${entered(v).n || ''}">
+        <select data-f="unit">${Object.keys(UNITS).map(u => `<option${entered(v).u === u ? ' selected' : ''}>${u}</option>`).join('')}</select></div>` : ''}
       <input type="datetime-local" data-f="t" value="${Number.isFinite(v.t) ? toLocalInput(v.t) : ''}">
     </div>`).join('') || '<p class="hint">Nothing added yet. Use the buttons below.</p>';
 }
@@ -483,7 +502,7 @@ function readEv() {
     const v = formEv[row.dataset.i];
     const t = new Date(row.querySelector('[data-f=t]').value).getTime();
     if (toLocalInput(t) !== toLocalInput(v.t)) v.t = t; // keep the exact second unless edited
-    if (v.k === 'bottle') { v.b = row.querySelector('[data-f=b]').value; v.oz = Number(row.querySelector('[data-f=oz]').value); }
+    if (v.k === 'bottle') { v.b = row.querySelector('[data-f=b]').value; setAmt(v, Number(row.querySelector('[data-f=amt]').value), row.querySelector('[data-f=unit]').value); }
   });
 }
 form.addEventListener('click', ev => {
@@ -494,7 +513,7 @@ form.addEventListener('click', ev => {
   else {
     const prev = formEv.length ? formEv[formEv.length - 1].t : NaN;
     const v = { k: add.dataset.evadd, t: Number.isFinite(prev) ? prev : Date.now() };
-    if (v.k === 'bottle') { v.b = load('bt.bottle', 'formula'); v.oz = 0; }
+    if (v.k === 'bottle') { v.b = load('bt.bottle', 'formula'); setAmt(v, 0, unit()); }
     formEv.push(v);
   }
   renderEv();
@@ -528,7 +547,7 @@ form.addEventListener('submit', ev => {
     if (!formEv.length) return alert('Add at least one side or a bottle.');
     for (const v of formEv) {
       if (!Number.isFinite(v.t)) return alert('Every line needs a day and time.');
-      if (v.k === 'bottle' && !(v.oz > 0 && v.oz <= 20)) return alert('Enter how many oz were in the bottle (up to 20).');
+      if (v.k === 'bottle' && !amtOk(v)) return alert('Enter how much was in the bottle (up to 20 oz or 600 ml).');
     }
     const ts = formEv.map(v => v.t);
     if (Math.max(...ts) - Math.min(...ts) > 6 * 3600000) return alert('These times are more than 6 hours apart. Check the day on each line.');
@@ -558,17 +577,19 @@ const bDlg = $('#bottleDlg'), bForm = $('#bottleForm');
 function openBottle() {
   bForm.reset();
   bForm.elements.b.value = load('bt.bottle', 'formula');
+  bForm.elements.unit.value = unit();
   const open = openFeed(live(), Date.now());
   $('#bottleHint').textContent = open ? `Adds to the feed that started at ${fmtTime(open.t)}.` : 'Starts a new feed now.';
   bDlg.showModal();
 }
 bForm.addEventListener('submit', ev => {
   ev.preventDefault();
-  const b = bForm.elements.b.value, oz = Number(bForm.elements.oz.value);
+  const b = bForm.elements.b.value, v = setAmt({ k: 'bottle', b }, Number(bForm.elements.amt.value), bForm.elements.unit.value);
   if (!BOTTLE[b]) return alert('Pick formula or breast milk.');
-  if (!(oz > 0 && oz <= 20)) return alert('Enter how many oz (up to 20).');
+  if (!amtOk(v)) return alert('Enter how much (up to 20 oz or 600 ml).');
   save('bt.bottle', b);
-  addEvent({ k: 'bottle', b, oz });
+  cfg.unit = entered(v).u; save('bt.cfg', cfg); // the unit you last used is the one this phone shows
+  addEvent(v);
   bDlg.close();
 });
 $('#bottleCancel').onclick = () => bDlg.close();
@@ -687,6 +708,7 @@ const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b =
 const inviteLink = () => location.origin + location.pathname + '#join=' + btoa(JSON.stringify({ db: cfg.db, code: cfg.code }));
 function showSettings() {
   sForm.elements.name.value = cfg.name;
+  sForm.elements.unit.value = unit();
   sForm.elements.feedHours.value = feedHours();
   sForm.elements.db.value = cfg.db;
   $('#inviteBtn').hidden = !cfg.db;
@@ -710,6 +732,7 @@ sForm.addEventListener('submit', ev => {
     save('bt.shared', shared); save('bt.sharedDirty', true);
   }
   cfg.name = sForm.elements.name.value.trim();
+  cfg.unit = sForm.elements.unit.value;
   cfg.db = db;
   if (db && !cfg.code) cfg.code = newCode();
   save('bt.cfg', cfg);
