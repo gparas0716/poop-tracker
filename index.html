@@ -333,14 +333,16 @@ function feedText(e) {
   return ev.map(v => `${evLabel(v)} ${fmtTime(v.t)}`).join(' → ');
 }
 const mins = ms => `${Math.round(ms / 60000)} min`;
-// Total and per-side minutes. A side runs until the next step, and the last one until the feed's end:
+// Total and per-side minutes. A side runs until the other side starts (a bottle does not end it), and
+// the last side until the feed's end:
 // the recorded end, or "now" while the feed is in progress. Without an end the last side is unknown.
 function durText(e, now, isOpen) {
   const ev = events(e), end = e.end || (isOpen ? now : null), per = {};
   let unknown = false;
   ev.forEach((v, i) => {
     if (!SIDE[v.k]) return;
-    const stop = ev[i + 1] ? ev[i + 1].t : end;
+    const next = ev.slice(i + 1).find(n => SIDE[n.k]);
+    const stop = next ? next.t : end;
     if (stop == null) unknown = true; else per[v.k] = (per[v.k] || 0) + Math.max(0, stop - v.t);
   });
   const parts = [];
