@@ -97,6 +97,16 @@ h1 { font-size: 22px; margin: 0; }
 .row .note { font-size: 14px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dur { font-size: 14px; color: var(--ink); margin-top: 2px; font-weight: 400; }
 .card.feed .add.stop { background: var(--ink); color: var(--bg); }
+.card .maincol { grid-column: 2; grid-row: 1 / span 3; display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 112px; }
+.card .maincol .add { padding: 14px 10px; }
+.card .add b { display: block; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.card .add small { display: block; font-size: 13px; font-weight: 600; }
+.card.feed .add.late { background: var(--danger); }
+.readout { text-align: center; line-height: 1.2; }
+.readout small { display: block; font-size: 13px; color: var(--muted); }
+.readout b { display: block; font-size: 30px; font-variant-numeric: tabular-nums; }
+.pausebtn { border: 2px solid var(--feed); background: none; border-radius: 12px; padding: 12px 6px; font-weight: 700; font-size: 15px; }
+.pausebtn.on { background: var(--feed); color: var(--bg); }
 .card .prompt { grid-column: 1 / -1; margin-top: 12px; font-weight: 600; }
 .card .link { grid-column: 1 / -1; justify-self: start; background: none; border: 0; padding: 10px 0 0; color: var(--accent); font-size: 14px; text-decoration: underline; }
 .row .by { font-weight: 400; font-size: 12px; color: var(--muted); }
@@ -326,30 +336,68 @@ function setEv(e, ev) { // store events in time order and drop the fields earlie
   for (const k of ['side', 'first', 't2', 'bottle', 'oz', 'formula']) delete n[k];
   return n;
 }
-const evLabel = v => (v.k === 'bottle' ? `${BOTTLE[v.b] || 'Bottle'} ${fmtMl(toMl(v))}` : SIDE[v.k] || '?');
+const STEP = { pause: 'Paused', resume: 'Resumed' };
+const evLabel = v => (STEP[v.k] ? STEP[v.k] : v.k === 'bottle' ? `${BOTTLE[v.b] || 'Bottle'} ${fmtMl(toMl(v))}` : SIDE[v.k] || '?');
 function feedText(e) {
-  const ev = events(e);
+  const ev = events(e).filter(v => !STEP[v.k]);
   if (ev.length < 2) return ev.length ? evLabel(ev[0]) : '?';
   return ev.map(v => `${evLabel(v)} ${fmtTime(v.t)}`).join(' → ');
 }
 const mins = ms => `${Math.round(ms / 60000)} min`;
-// Total and per-side minutes. A side runs until the other side starts (a bottle does not end it), and
-// the last side until the feed's end:
-// the recorded end, or "now" while the feed is in progress. Without an end the last side is unknown.
-function durText(e, now, isOpen) {
+// Work out a feed's minutes. A side runs until the other side starts (a bottle does not end it) and the
+// last side until the feed's end: the recorded end, or "now" while in progress. Time between a pause and
+// the next resume (or side) is left out of every figure.
+function feedCalc(e, now, isOpen) {
   const ev = events(e), end = e.end || (isOpen ? now : null), per = {};
-  let unknown = false;
+  let cur = null, paused = false, total = 0, pausedMs = 0, curRun = 0, unknown = false;
   ev.forEach((v, i) => {
-    if (!SIDE[v.k]) return;
-    const next = ev.slice(i + 1).find(n => SIDE[n.k]);
-    const stop = next ? next.t : end;
-    if (stop == null) unknown = true; else per[v.k] = (per[v.k] || 0) + Math.max(0, stop - v.t);
+    if (SIDE[v.k]) { if (v.k !== cur) curRun = 0; cur = v.k; paused = false; }
+    else if (v.k === 'pause') paused = true;
+    else if (v.k === 'resume') paused = false;
+    const stop = ev[i + 1] ? ev[i + 1].t : end;
+    if (stop == null) { unknown = !!cur && !paused; return; }
+    const dt = Math.max(0, stop - v.t);
+    if (paused) pausedMs += dt;
+    else { total += dt; if (cur) { per[cur] = (per[cur] || 0) + dt; curRun += dt; } }
   });
-  const parts = [];
-  if (end != null) parts.push(`Total ${mins(end - e.t)}`);
-  for (const k in SIDE) if (per[k] != null) parts.push(`${SIDE[k]} ${mins(per[k])}`);
-  if (!parts.length && !unknown) return '';
-  return parts.join(' · ') + (isOpen ? ' so far' : '') + (unknown ? `${parts.length ? ' · ' : ''}end of feed not recorded` : '');
+  return { per, total: end == null ? null : total, pausedMs, cur, curRun, paused, unknown };
+}
+function durText(e, now, isOpen) {
+  const c = feedCalc(e, now, isOpen), parts = [];
+  if (c.total != null) parts.push(`Total ${mins(c.total)}`);
+  for (const k in SIDE) if (c.per[k] != null) parts.push(`${SIDE[k]} ${mins(c.per[k])}`);
+  if (c.pausedMs >= 30000) parts.push(`paused ${mins(c.pausedMs)}`);
+  if (!parts.length && !c.unknown) return '';
+  return parts.join(' · ') + (isOpen ? (c.paused ? ' · paused now' : ' so far') : '') + (c.unknown ? `${parts.length ? ' · ' : ''}end of feed not recorded` : '');
+}
+// 0:00 clocks: m:ss for running timers, h:mm for the countdown to the next feed
+const p2 = n => String(n).padStart(2, '0');
+function clock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600);
+  return (h ? `${h}:${p2(Math.floor(s / 60) % 60)}` : `${Math.floor(s / 60)}`) + `:${p2(s % 60)}`;
+}
+function countdown(ms) { const m = Math.ceil(Math.abs(ms) / 60000); return `${Math.floor(m / 60)}:${p2(m % 60)}`; }
+// what the live timers on the feed card should read right now
+function timers(all, now) {
+  const open = openFeed(all, now), last = all.find(e => e.type === 'feed' && e.t <= now), t = {};
+  if (open) {
+    const c = feedCalc(open, now, true);
+    t.label = c.paused ? 'Paused' : c.cur ? SIDE[c.cur] : 'This feed';
+    t.side = clock(c.cur ? c.curRun : c.total);
+    t.total = c.cur ? `Total ${clock(c.total)}` : '';
+    t.paused = c.paused;
+  } else if (last) {
+    const left = last.t + feedHours() * 3600000 - now;
+    t.next = countdown(left); t.late = left <= 0;
+  }
+  return t;
+}
+function tick() { // update just the timer text every second, without redrawing the buttons
+  const t = timers(live(), Date.now());
+  for (const [id, v] of [['tSide', t.side], ['tTotal', t.total], ['tNext', t.next]]) {
+    const el = document.getElementById(id);
+    if (el && v != null && el.textContent !== v) el.textContent = v;
+  }
 }
 const lastSideOf = e => events(e).filter(v => SIDE[v.k]).pop();
 function lastSide(all, now) { // most recent breast side across all feeds
@@ -404,9 +452,14 @@ function render() {
           + `<div class="what">${esc(feedText(last))}</div>${d ? `<div class="dur">${esc(d)}</div>` : ''}`;
       }
       if (ls) sub += `<div class="next">Last side: ${SIDE[ls.k]} <span>started ${fmtTime(ls.t)} · ${ago(ls.t)}</span></div>`;
-      main = open ? '<button class="add stop" data-feedmain>Finish feed</button>'
+      const t = timers(all, now);
+      main = '<div class="maincol">' + (open
+        ? `<button class="add stop" data-feedmain>Finish feed</button>
+           <div class="readout"><small>${t.label}</small><b id="tSide">${t.side}</b><small id="tTotal">${t.total}</small></div>
+           <button class="pausebtn${t.paused ? ' on' : ''}" data-pause>${t.paused ? 'Resume' : 'Pause'}</button>`
         : starting ? '<button class="add stop" data-feedmain>Cancel</button>'
-        : '<button class="add" data-feedmain>New feed</button>';
+        : t.next ? `<button class="add${t.late ? ' late' : ''}" data-feedmain><b id="tNext">${t.next}</b><small>${t.late ? 'overdue · new feed' : 'New feed'}</small></button>`
+        : '<button class="add" data-feedmain>New feed</button>') + '</div>';
       // the step buttons only appear once a feed is started or in progress
       if (open || starting) sides = (open ? '' : '<div class="prompt">What does this feed start with?</div>')
         + '<div class="sides">' + ['left', 'right'].map(sd =>
@@ -491,7 +544,7 @@ form.addEventListener('change', updateFormVisibility);
 let formEv = []; // working copy of a feed's events while the form is open
 function renderEv() {
   $('#evList').innerHTML = formEv.map((v, i) => `<div class="ev" data-i="${i}">
-      <div class="ev-head"><b>${v.k === 'bottle' ? 'Bottle' : SIDE[v.k] + ' side started'}</b><button type="button" data-evdel="${i}">Remove</button></div>
+      <div class="ev-head"><b>${STEP[v.k] || (v.k === 'bottle' ? 'Bottle' : SIDE[v.k] + ' side started')}</b><button type="button" data-evdel="${i}">Remove</button></div>
       ${v.k === 'bottle' ? `<div class="ev-bottle"><select data-f="b">${Object.keys(BOTTLE).map(b =>
         `<option value="${b}"${v.b === b ? ' selected' : ''}>${BOTTLE[b]}</option>`).join('')}</select>
         <input type="number" data-f="amt" inputmode="decimal" min="0" step="any" value="${entered(v).n || ''}">
@@ -613,6 +666,11 @@ document.addEventListener('click', ev => {
   const sideBtn = ev.target.closest('[data-side]');
   if (sideBtn) return tapSide(sideBtn.dataset.side);
   if (ev.target.closest('[data-bottle]')) return openBottle();
+  if (ev.target.closest('[data-pause]')) {
+    const open = openFeed(live(), Date.now());
+    if (open) addEvent({ k: feedCalc(open, Date.now(), true).paused ? 'resume' : 'pause' });
+    return;
+  }
   if (ev.target.closest('[data-feedmain]')) {
     const open = openFeed(live(), Date.now());
     if (open) commit({ ...open, done: true, end: Date.now() }); // Finish feed
@@ -702,6 +760,7 @@ function connect() {
 window.addEventListener('online', pull);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); pull(); } });
 setInterval(render, 60000);
+setInterval(tick, 1000);
 setInterval(() => { if (!document.hidden && syncState === 'error') pull(); }, 30000);
 
 /* ---------- settings + invite link ---------- */
