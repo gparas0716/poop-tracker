@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Baby Log</title>
-<meta name="theme-color" content="#f6f1ea">
+<meta name="theme-color" content="#f6f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1917" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Baby Log">
 <link rel="manifest" href="manifest.json">
@@ -48,6 +49,10 @@ h1 { font-size: 22px; margin: 0; }
 .card .count { font-size: 34px; font-weight: 700; line-height: 1.1; }
 .card .count small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; }
 .card .sub { font-size: 14px; color: var(--muted); grid-column: 1; }
+.card .next { grid-column: 1; font-size: 15px; font-weight: 600; margin-top: 4px; }
+.card .next span { font-weight: 400; color: var(--muted); }
+.card .next.due { color: var(--danger); }
+.card .next.due span { color: inherit; }
 .card .add {
   grid-column: 2; grid-row: 1 / span 3; border: 0; border-radius: 14px; color: #fff;
   font-weight: 700; font-size: 16px; padding: 18px 16px; min-width: 104px;
@@ -58,7 +63,7 @@ h1 { font-size: 22px; margin: 0; }
 @media (prefers-color-scheme: dark) { .card .add { color: #1b1917; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px 2px 6px; }
-.dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(128,128,128,.5); display: inline-block; flex: none; }
+.dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(128,128,128,.9); display: inline-block; flex: none; }
 
 .tabs { display: flex; gap: 6px; margin: 22px 0 6px; }
 .tabs button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 0; font-size: 14px; }
@@ -188,6 +193,9 @@ textarea { min-height: 70px; resize: vertical; }
     <label class="f">Your name (shown on each entry)
       <input type="text" name="name" placeholder="Mom, Dad…" maxlength="20">
     </label>
+    <label class="f">Hours between feeds (counted from the start of the last feed)
+      <input type="number" name="feedHours" inputmode="decimal" min="0.5" max="12" step="0.25">
+    </label>
     <label class="f">Sync database URL (Firebase Realtime Database)
       <input type="url" name="db" placeholder="https://your-project-default-rtdb.firebaseio.com" autocapitalize="off" autocorrect="off">
     </label>
@@ -222,6 +230,10 @@ const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 let entries = load('bt.entries', {});   // id -> entry (deleted ones kept as tombstones so deletes sync)
 let dirty = new Set(load('bt.dirty', [])); // ids not yet pushed
 let cfg = load('bt.cfg', { name: '', db: '', code: '' });
+// settings both phones must agree on; synced like entries, newest change wins
+let shared = load('bt.shared', { feedHours: 3, updated: 0 });
+let sharedDirty = load('bt.sharedDirty', false);
+const feedHours = () => (shared.feedHours >= 0.5 && shared.feedHours <= 12 ? shared.feedHours : 3);
 let filter = 'all';
 let syncState = 'idle';
 const persist = () => { save('bt.entries', entries); save('bt.dirty', [...dirty]); };
@@ -236,6 +248,10 @@ function fmtDay(ms) {
   if (k === dayKey(now)) return 'Today';
   if (k === dayKey(now - DAY)) return 'Yesterday';
   return new Date(ms).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function span(ms) { // "1h 5m" for a positive duration
+  const m = Math.max(0, Math.round(ms / 60000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 function ago(ms) {
   const m = Math.round((Date.now() - ms) / 60000);
@@ -278,12 +294,19 @@ function render() {
         `<span class="chip">${dot(c.id)}${esc(c.label)} × ${by[c.id]}</span>`).join('') + '</div>';
     }
     if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, ${ago(last.t)}`;
+    if (type === 'feed' && last) {
+      const due = last.t + feedHours() * 3600000, left = due - now;
+      const day = dayKey(due) === dayKey(now) ? '' : fmtDay(due) + ' ';
+      extra = left > 0
+        ? `<div class="next">Next feed: ${day}${fmtTime(due)} <span>in ${span(left)}</span></div>`
+        : `<div class="next due">Next feed: was due ${day}${fmtTime(due)} <span>· ${span(-left)} overdue</span></div>`;
+    }
     if (type === 'feed') {
       const oz = {};
       recent.forEach(e => { const b = bottleOf(e); if (b) oz[b] = (oz[b] || 0) + (Number(e.oz) || 0); });
       const chips = Object.keys(BOTTLE).filter(b => oz[b]).map(b =>
         `<span class="chip" style="padding-left:9px">${BOTTLE[b]} ${fmtOz(oz[b])}</span>`);
-      if (chips.length) extra = `<div class="chips">${chips.join('')}</div>`;
+      if (chips.length) extra += `<div class="chips">${chips.join('')}</div>`;
     }
     return `<div class="card ${type}">
       <h2>${TYPES[type]}</h2>
@@ -439,12 +462,29 @@ async function push() {
   if (dirty.size && syncState === 'ok') push();
 }
 
+async function syncShared() {
+  const url = `${base()}/settings.json`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const remote = await r.json();
+  if (remote && typeof remote === 'object' && (remote.updated || 0) > (shared.updated || 0)) {
+    shared = { feedHours: Number(remote.feedHours), updated: remote.updated };
+    sharedDirty = false;
+  } else if (sharedDirty) {
+    const w = await fetch(url, { method: 'PUT', body: JSON.stringify(shared) });
+    if (!w.ok) throw new Error('HTTP ' + w.status);
+    sharedDirty = false;
+  }
+  save('bt.shared', shared); save('bt.sharedDirty', sharedDirty);
+}
+
 async function pull() {
   if (!cfg.db) return;
   try {
     const r = await fetch(`${base()}/entries.json`);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const remote = (await r.json()) || {};
+    await syncShared();
     for (const [id, re] of Object.entries(remote)) {
       if (!re || typeof re !== 'object' || !TYPES[re.type]) continue;
       const le = entries[id];
@@ -479,6 +519,7 @@ const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b =
 const inviteLink = () => location.origin + location.pathname + '#join=' + btoa(JSON.stringify({ db: cfg.db, code: cfg.code }));
 function showSettings() {
   sForm.elements.name.value = cfg.name;
+  sForm.elements.feedHours.value = feedHours();
   sForm.elements.db.value = cfg.db;
   $('#inviteBtn').hidden = !cfg.db;
   $('#syncHint').textContent = cfg.db
@@ -493,12 +534,19 @@ sForm.addEventListener('submit', ev => {
   const db = sForm.elements.db.value.trim();
   if (db && !/^https:\/\/[^/]+/.test(db)) return alert('The database URL should start with https://');
   const changed = db !== cfg.db;
+  const fh = Number(sForm.elements.feedHours.value);
+  if (!(fh >= 0.5 && fh <= 12)) return alert('Hours between feeds should be between 0.5 and 12.');
+  const fhChanged = fh !== feedHours();
+  if (fhChanged) {
+    shared = { feedHours: fh, updated: Date.now() }; sharedDirty = true;
+    save('bt.shared', shared); save('bt.sharedDirty', true);
+  }
   cfg.name = sForm.elements.name.value.trim();
   cfg.db = db;
   if (db && !cfg.code) cfg.code = newCode();
   save('bt.cfg', cfg);
   sDlg.close();
-  if (changed) { syncState = 'idle'; connect(); } else render();
+  if (changed) { syncState = 'idle'; connect(); } else { render(); if (fhChanged) pull(); }
 });
 $('#inviteBtn').onclick = async () => {
   const url = inviteLink();
