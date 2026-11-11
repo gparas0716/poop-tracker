@@ -99,7 +99,7 @@ h1 { font-size: 22px; margin: 0; }
 .card.feed .add.stop { background: var(--ink); color: var(--bg); }
 .card .maincol { grid-column: 2; grid-row: 1 / span 3; display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 112px; }
 .card .maincol .add { padding: 14px 10px; }
-.card .add b { display: block; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.card .add b { display: block; font-size: 26px; white-space: nowrap; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .card .add small { display: block; font-size: 13px; font-weight: 600; }
 .card.feed .add.late { background: var(--danger); }
 .readout { text-align: center; line-height: 1.2; }
@@ -370,13 +370,13 @@ function durText(e, now, isOpen) {
   if (!parts.length && !c.unknown) return '';
   return parts.join(' · ') + (isOpen ? (c.paused ? ' · paused now' : ' so far') : '') + (c.unknown ? `${parts.length ? ' · ' : ''}end of feed not recorded` : '');
 }
-// 0:00 clocks: m:ss for running timers, h:mm for the countdown to the next feed
+// m:ss clocks for running timers; "56m" / "1h 26m" for the countdown to the next feed
 const p2 = n => String(n).padStart(2, '0');
 function clock(ms) {
   const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600);
   return (h ? `${h}:${p2(Math.floor(s / 60) % 60)}` : `${Math.floor(s / 60)}`) + `:${p2(s % 60)}`;
 }
-function countdown(ms) { const m = Math.ceil(Math.abs(ms) / 60000); return `${Math.floor(m / 60)}:${p2(m % 60)}`; }
+function countdown(ms) { const m = Math.ceil(Math.abs(ms) / 60000); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; }
 // what the live timers on the feed card should read right now
 function timers(all, now) {
   const open = openFeed(all, now), last = all.find(e => e.type === 'feed' && e.t <= now), t = {};
@@ -388,7 +388,7 @@ function timers(all, now) {
     t.paused = c.paused;
   } else if (last) {
     const left = last.t + feedHours() * 3600000 - now;
-    t.next = countdown(left); t.late = left <= 0;
+    t.next = countdown(left); t.late = left <= 0; t.at = fmtTime(now + left);
   }
   return t;
 }
@@ -458,7 +458,7 @@ function render() {
            <div class="readout"><small>${t.label}</small><b id="tSide">${t.side}</b><small id="tTotal">${t.total}</small></div>
            <button class="pausebtn${t.paused ? ' on' : ''}" data-pause>${t.paused ? 'Resume' : 'Pause'}</button>`
         : starting ? '<button class="add stop" data-feedmain>Cancel</button>'
-        : t.next ? `<button class="add${t.late ? ' late' : ''}" data-feedmain><b id="tNext">${t.next}</b><small>${t.late ? 'overdue · new feed' : 'New feed'}</small></button>`
+        : t.next ? `<button class="add${t.late ? ' late' : ''}" data-feedmain aria-label="New feed"><b id="tNext">${t.next}</b><small>${t.late ? 'late · ' : ''}${t.at}</small></button>`
         : '<button class="add" data-feedmain>New feed</button>') + '</div>';
       // the step buttons only appear once a feed is started or in progress
       if (open || starting) sides = (open ? '' : '<div class="prompt">What does this feed start with?</div>')
@@ -469,7 +469,7 @@ function render() {
       sides += open ? `<button class="link" data-edit="${esc(open.id)}">Correct this feed</button>`
         : '<button class="link" data-add="feed">Add a missed feed</button>';
     }
-    if (type === 'feed' && last) {
+    if (type === 'feed' && last && openFeed(all, now)) {
       const due = last.t + feedHours() * 3600000, left = due - now;
       const day = dayKey(due) === dayKey(now) ? '' : fmtDay(due) + ' ';
       extra = left > 0
