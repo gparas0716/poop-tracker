@@ -84,7 +84,7 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 dialog form { padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); display: grid; gap: 14px; }
 dialog h3 { margin: 0; font-size: 19px; }
 label.f { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
-input[type=text], input[type=url], input[type=datetime-local], textarea {
+input[type=text], input[type=url], input[type=number], input[type=datetime-local], textarea {
   width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 16px;
 }
 textarea { min-height: 70px; resize: vertical; }
@@ -97,6 +97,8 @@ textarea { min-height: 70px; resize: vertical; }
 }
 .seg input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+.check input { width: 24px; height: 24px; accent-color: var(--accent); }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 9px 12px; font-size: 14px; }
 .actions { display: flex; gap: 8px; }
 .actions button { flex: 1; border-radius: 12px; padding: 14px; font-weight: 700; border: 1px solid var(--line); background: none; }
@@ -145,6 +147,7 @@ textarea { min-height: 70px; resize: vertical; }
         <label><input type="radio" name="side" value="left"><span>Left</span></label>
         <label><input type="radio" name="side" value="right"><span>Right</span></label>
         <label><input type="radio" name="side" value="both"><span>Both</span></label>
+        <label><input type="radio" name="side" value="none"><span>No breast</span></label>
       </div>
       <div id="firstWrap" hidden style="margin-top:14px">
         <label class="f">Which side first?</label>
@@ -153,6 +156,12 @@ textarea { min-height: 70px; resize: vertical; }
           <label><input type="radio" name="first" value="right"><span>Right first</span></label>
         </div>
       </div>
+      <label class="check" style="margin-top:14px">
+        <input type="checkbox" name="formula"> <span>Formula</span>
+      </label>
+      <label class="f" id="ozWrap" hidden style="margin-top:10px">How many oz?
+        <input type="number" name="oz" inputmode="decimal" min="0.25" max="20" step="0.25" placeholder="e.g. 2.5">
+      </label>
     </div>
 
     <label class="f">Notes
@@ -232,9 +241,13 @@ function ago(ms) {
 }
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const live = () => Object.values(entries).filter(e => !e.deleted).sort((a, b) => b.t - a.t);
+const fmtOz = n => `${Math.round(n * 100) / 100} oz`;
 function feedText(e) {
-  if (e.side === 'both') return `Both — ${e.first || '?'} first`;
-  return cap(e.side || '?');
+  const parts = [];
+  if (e.side === 'both') parts.push(`Both — ${e.first || '?'} first`);
+  else if (e.side && e.side !== 'none') parts.push(cap(e.side));
+  if (e.formula) parts.push(`Formula ${fmtOz(e.oz || 0)}`);
+  return parts.join(' + ') || '?';
 }
 const dot = id => `<span class="dot" style="background:${COLOR[id]?.hex || '#999'}"></span>`;
 
@@ -254,6 +267,10 @@ function render() {
         `<span class="chip">${dot(c.id)}${esc(c.label)} × ${by[c.id]}</span>`).join('') + '</div>';
     }
     if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, ${ago(last.t)}`;
+    if (type === 'feed') {
+      const oz = recent.reduce((n, e) => n + (e.formula ? Number(e.oz) || 0 : 0), 0);
+      if (oz) extra = `<div class="chips"><span class="chip" style="padding-left:9px">Formula ${fmtOz(oz)} in last 24 hours</span></div>`;
+    }
     return `<div class="card ${type}">
       <h2>${TYPES[type]}</h2>
       <button class="add" data-add="${type}">+ ${TYPES[type]}</button>
@@ -303,6 +320,7 @@ $('#colorSeg').innerHTML = COLORS.map(c =>
 function updateFormVisibility() {
   const side = form.elements.side.value;
   $('#firstWrap').hidden = side !== 'both';
+  $('#ozWrap').hidden = !form.elements.formula.checked;
   $('#colorWarn').hidden = !COLOR[form.elements.color.value]?.warn;
 }
 form.addEventListener('change', updateFormVisibility);
@@ -319,6 +337,8 @@ function openEntry(type, entry) {
   if (type === 'feed') {
     form.elements.side.value = entry?.side || '';
     form.elements.first.value = entry?.first || '';
+    form.elements.formula.checked = !!entry?.formula;
+    form.elements.oz.value = entry?.formula ? entry.oz : '';
   }
   $('#delBtn').hidden = !entry;
   updateFormVisibility();
@@ -335,7 +355,15 @@ form.addEventListener('submit', ev => {
   if (formType === 'poop') e.color = form.elements.color.value;
   if (formType === 'feed') {
     e.side = form.elements.side.value;
-    if (!e.side) return alert('Pick left, right or both.');
+    if (!e.side) return alert('Pick left, right, both or no breast.');
+    if (form.elements.formula.checked) {
+      const oz = Number(form.elements.oz.value);
+      if (!(oz > 0 && oz <= 20)) return alert('Enter how many oz of formula (up to 20).');
+      e.formula = true; e.oz = oz;
+    } else {
+      if (e.side === 'none') return alert('Pick a side, or tick Formula.');
+      delete e.formula; delete e.oz;
+    }
     if (e.side === 'both') {
       e.first = form.elements.first.value;
       if (!e.first) return alert('Pick which side was first.');
