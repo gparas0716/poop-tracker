@@ -1,5 +1,5 @@
 // Offline support: serve the app shell from cache, refresh it in the background.
-const CACHE = 'baby-log-v4';
+const CACHE = 'baby-log-v5';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon.svg', 'icon-180.png'];
 
 self.addEventListener('install', e => {

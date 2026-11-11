@@ -53,6 +53,12 @@ h1 { font-size: 22px; margin: 0; }
 .card .next span { font-weight: 400; color: var(--muted); }
 .card .next.due { color: var(--danger); }
 .card .next.due span { color: inherit; }
+.card .sides { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 10px; }
+.card .sides button {
+  flex: 1; border: 2px solid var(--feed); background: none; color: var(--ink); border-radius: 12px;
+  padding: 13px 6px; font-weight: 700; font-size: 15px;
+}
+.card .sides button.done { border-color: var(--line); color: var(--muted); font-weight: 600; }
 .card .add {
   grid-column: 2; grid-row: 1 / span 3; border: 0; border-radius: 14px; color: #fff;
   font-weight: 700; font-size: 16px; padding: 18px 16px; min-width: 104px;
@@ -89,7 +95,7 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 dialog form { padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); display: grid; gap: 14px; }
 dialog h3 { margin: 0; font-size: 19px; }
 label.f { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
-input[type=text], input[type=url], input[type=number], input[type=datetime-local], textarea {
+input[type=text], input[type=url], input[type=number], input[type=time], input[type=datetime-local], textarea {
   width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 16px;
 }
 textarea { min-height: 70px; resize: vertical; }
@@ -161,6 +167,9 @@ textarea { min-height: 70px; resize: vertical; }
           <label><input type="radio" name="first" value="right"><span>Right first</span></label>
         </div>
       </div>
+      <label class="f" id="t2Wrap" hidden style="margin-top:14px"><span id="t2Label">Second side started (optional)</span>
+        <input type="time" name="t2">
+      </label>
       <label class="check" style="margin-top:14px">
         <input type="checkbox" name="bottle"> <span>Bottle</span>
       </label>
@@ -268,9 +277,32 @@ const BOTTLE = { formula: 'Formula', milk: 'Breast milk' };
 // entries saved before bottle types existed only have `formula: true`
 const bottleOf = e => BOTTLE[e.bottle] ? e.bottle : e.formula ? 'formula' : '';
 const fmtOz = n => `${Math.round(n * 100) / 100} oz`;
+const OPEN_MS = 60 * 60000; // a second side tapped within this long joins the same feed
+const other = side => (side === 'left' ? 'right' : 'left');
+// most recent breast side and when it was started
+function lastSide(all, now) {
+  for (const e of all) {
+    if (e.type !== 'feed' || e.t > now) continue;
+    if (e.side === 'left' || e.side === 'right') return { side: e.side, at: e.t };
+    if (e.side === 'both' && e.first) return { side: other(e.first), at: e.t2 || e.t, exact: !!e.t2 };
+  }
+  return null;
+}
+// a one-sided feed started recently enough that the other side still belongs to it
+function openFeed(all, now) {
+  const e = all.find(e => e.type === 'feed' && e.t <= now);
+  return e && (e.side === 'left' || e.side === 'right') && now - e.t < OPEN_MS ? e : null;
+}
+function tapSide(side) {
+  const now = Date.now(), open = openFeed(live(), now);
+  if (open && open.side !== side) return commit({ ...open, side: 'both', first: open.side, t2: now });
+  if (open && !confirm(`${cap(side)} was already started at ${fmtTime(open.t)} for this feed. Start a new feed?`)) return;
+  commit({ id: newId(), type: 'feed', t: now, side, note: '', by: cfg.name || '' });
+}
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 function feedText(e) {
   const parts = [];
-  if (e.side === 'both') parts.push(`Both — ${e.first || '?'} first`);
+  if (e.side === 'both') parts.push(`Both — ${e.first || '?'} first` + (e.t2 && e.first ? `, ${other(e.first)} at ${fmtTime(e.t2)}` : ''));
   else if (e.side && e.side !== 'none') parts.push(cap(e.side));
   const b = bottleOf(e);
   if (b) parts.push(`${BOTTLE[b]} ${fmtOz(e.oz || 0)}`);
@@ -293,7 +325,15 @@ function render() {
       extra = '<div class="chips">' + COLORS.filter(c => by[c.id]).map(c =>
         `<span class="chip">${dot(c.id)}${esc(c.label)} × ${by[c.id]}</span>`).join('') + '</div>';
     }
-    if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, ${ago(last.t)}`;
+    let sides = '';
+    if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, started ${ago(last.t)}`;
+    if (type === 'feed') {
+      const ls = lastSide(all, now), open = openFeed(all, now);
+      if (ls) sub += `<div class="next">Last side: ${cap(ls.side)} <span>${ls.exact === false ? 'during feed started' : 'started'} ${fmtTime(ls.at)} · ${ago(ls.at)}</span></div>`;
+      sides = '<div class="sides">' + ['left', 'right'].map(sd =>
+        open && open.side === sd ? `<button class="done" data-side="${sd}">${cap(sd)} ✓ ${fmtTime(open.t)}</button>`
+        : `<button data-side="${sd}">${open ? 'Switch to' : 'Start'} ${cap(sd)}</button>`).join('') + '</div>';
+    }
     if (type === 'feed' && last) {
       const due = last.t + feedHours() * 3600000, left = due - now;
       const day = dayKey(due) === dayKey(now) ? '' : fmtDay(due) + ' ';
@@ -312,7 +352,7 @@ function render() {
       <h2>${TYPES[type]}</h2>
       <button class="add" data-add="${type}">+ ${TYPES[type]}</button>
       <div class="count">${recent.length}<small>in last 24 hours</small></div>
-      <div class="sub">${sub}${extra}</div>
+      <div class="sub">${sub}${extra}</div>${sides}
     </div>`;
   });
   $('#cards').innerHTML = cards.join('');
@@ -357,6 +397,9 @@ $('#colorSeg').innerHTML = COLORS.map(c =>
 function updateFormVisibility() {
   const side = form.elements.side.value;
   $('#firstWrap').hidden = side !== 'both';
+  const first = form.elements.first.value;
+  $('#t2Wrap').hidden = side !== 'both';
+  $('#t2Label').textContent = (first ? `${cap(other(first))} side started` : 'Second side started') + ' (optional)';
   $('#bottleWrap').hidden = !form.elements.bottle.checked;
   $('#colorWarn').hidden = !COLOR[form.elements.color.value]?.warn;
 }
@@ -374,6 +417,7 @@ function openEntry(type, entry) {
   if (type === 'feed') {
     form.elements.side.value = entry?.side || '';
     form.elements.first.value = entry?.first || '';
+    form.elements.t2.value = entry?.t2 ? toLocalInput(entry.t2).slice(11) : '';
     const b = entry ? bottleOf(entry) : '';
     form.elements.bottle.checked = !!b;
     form.elements.btype.value = b;
@@ -388,7 +432,7 @@ form.addEventListener('submit', ev => {
   ev.preventDefault();
   const t = new Date(form.elements.time.value).getTime();
   if (!Number.isFinite(t)) return alert('Please pick a day and time.');
-  const e = editing ? { ...editing } : { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), type: formType };
+  const e = editing ? { ...editing } : { id: newId(), type: formType };
   e.t = t;
   e.note = form.elements.note.value.trim();
   if (formType === 'poop') e.color = form.elements.color.value;
@@ -408,7 +452,15 @@ form.addEventListener('submit', ev => {
     if (e.side === 'both') {
       e.first = form.elements.first.value;
       if (!e.first) return alert('Pick which side was first.');
-    } else delete e.first;
+      delete e.t2;
+      if (form.elements.t2.value) { // a clock time on the feed's day, or just after midnight
+        const d = new Date(t), [h, m] = form.elements.t2.value.split(':').map(Number);
+        d.setHours(h, m, 0, 0);
+        if (d.getTime() < t) d.setDate(d.getDate() + 1);
+        if (d.getTime() - t > 6 * 3600000) return alert('The second side should start after the feed starts, within a few hours.');
+        e.t2 = d.getTime();
+      }
+    } else { delete e.first; delete e.t2; }
   }
   if (!editing) e.by = cfg.name || '';
   commit(e);
@@ -428,6 +480,8 @@ function commit(e) {
 }
 
 document.addEventListener('click', ev => {
+  const sideBtn = ev.target.closest('[data-side]');
+  if (sideBtn) return tapSide(sideBtn.dataset.side);
   const add = ev.target.closest('[data-add]');
   if (add) return openEntry(add.dataset.add);
   const row = ev.target.closest('[data-edit]');

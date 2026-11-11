@@ -6,6 +6,8 @@ A small phone-friendly web app for two parents to log a baby's poop, pee and fee
 - **Pee** — day and time, notes. Shows the count for the last 24 hours.
 - **Feed** — day and time, left / right / both (and which side was first), bottle (formula or pumped breast milk) and how many oz, notes.
   Shows the last feed and the formula and breast-milk bottle totals for the last 24 hours.
+- **Start Left / Start Right** — one tap records when a side started. Tapping the other side within an hour
+  adds it to the same feed. The feed card shows the last side and how long ago it started.
 - **Next feed** — the feed card shows when the next feed is due: 3 hours after the start of the last feed.
   The interval can be changed in Settings and is shared by both phones.
 - History grouped by day with per-day totals. Tap any entry to edit or delete it.
