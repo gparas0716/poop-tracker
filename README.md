@@ -4,11 +4,10 @@ A small phone-friendly web app for two parents to log a baby's poop, pee and fee
 
 - **Poop** — day and time, color, notes. Shows the count for the last 24 hours, broken down by color.
 - **Pee** — day and time, notes. Shows the count for the last 24 hours.
-- **Feed** — one feed can hold several timed steps: left side started, right side started, and bottles
-  (formula or pumped breast milk, with oz). Tap **Start Left / Start Right / Bottle** to record a step at the
-  current time. Everything recorded while a feed is in progress joins that feed; it stays in progress until you
-  tap **Finish this feed**, or for 2 hours after it started. The card shows the last side and when it started,
-  and bottle totals for the last 24 hours. **+ Feed** logs a feed after the fact.
+- **Feed** — tap **New feed**, then what it starts with: **Left**, **Right** or **Bottle** (formula or pumped
+  breast milk, with oz). Each further tap adds a timed step to the same feed. Tap **Finish feed** when done; the
+  log then shows the total minutes and the minutes per side. A feed left unfinished closes itself 2 hours after
+  it started, without an end time. **Correct this feed** and **Add a missed feed** open the full form.
 - **Next feed** — the feed card shows when the next feed is due: 3 hours after the first step of the last feed.
   The interval can be changed in Settings and is shared by both phones.
 - History grouped by day with per-day totals. Tap any entry to edit or delete it.

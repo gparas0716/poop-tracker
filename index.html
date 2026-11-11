@@ -92,6 +92,10 @@ h1 { font-size: 22px; margin: 0; }
 .row .time { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; padding-top: 1px; }
 .row .what { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .row .note { font-size: 14px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dur { font-size: 14px; color: var(--ink); margin-top: 2px; font-weight: 400; }
+.card.feed .add.stop { background: var(--ink); color: var(--bg); }
+.card .prompt { grid-column: 1 / -1; margin-top: 12px; font-weight: 600; }
+.card .link { grid-column: 1 / -1; justify-self: start; background: none; border: 0; padding: 10px 0 0; color: var(--accent); font-size: 14px; text-decoration: underline; }
 .row .by { font-weight: 400; font-size: 12px; color: var(--muted); }
 .empty { text-align: center; color: var(--muted); padding: 28px 0; }
 
@@ -168,6 +172,9 @@ textarea { min-height: 70px; resize: vertical; }
         <button type="button" data-evadd="right">+ Right</button>
         <button type="button" data-evadd="bottle">+ Bottle</button>
       </div>
+      <label class="f" style="margin-top:14px">Feed ended (needed to work out the minutes)
+        <input type="datetime-local" name="end">
+      </label>
     </div>
 
     <label class="f">Notes
@@ -247,6 +254,7 @@ let shared = load('bt.shared', { feedHours: 3, updated: 0 });
 let sharedDirty = load('bt.sharedDirty', false);
 const feedHours = () => (shared.feedHours >= 0.5 && shared.feedHours <= 12 ? shared.feedHours : 3);
 let filter = 'all';
+let starting = false; // "New feed" was tapped and we are waiting for the first step
 let syncState = 'idle';
 const persist = () => { save('bt.entries', entries); save('bt.dirty', [...dirty]); };
 
@@ -306,6 +314,23 @@ function feedText(e) {
   if (ev.length < 2) return ev.length ? evLabel(ev[0]) : '?';
   return ev.map(v => `${evLabel(v)} ${fmtTime(v.t)}`).join(' → ');
 }
+const mins = ms => `${Math.round(ms / 60000)} min`;
+// Total and per-side minutes. A side runs until the next step, and the last one until the feed's end:
+// the recorded end, or "now" while the feed is in progress. Without an end the last side is unknown.
+function durText(e, now, isOpen) {
+  const ev = events(e), end = e.end || (isOpen ? now : null), per = {};
+  let unknown = false;
+  ev.forEach((v, i) => {
+    if (!SIDE[v.k]) return;
+    const stop = ev[i + 1] ? ev[i + 1].t : end;
+    if (stop == null) unknown = true; else per[v.k] = (per[v.k] || 0) + Math.max(0, stop - v.t);
+  });
+  const parts = [];
+  if (end != null) parts.push(`Total ${mins(end - e.t)}`);
+  for (const k in SIDE) if (per[k] != null) parts.push(`${SIDE[k]} ${mins(per[k])}`);
+  if (!parts.length && !unknown) return '';
+  return parts.join(' · ') + (isOpen ? ' so far' : '') + (unknown ? `${parts.length ? ' · ' : ''}end of feed not recorded` : '');
+}
 const lastSideOf = e => events(e).filter(v => SIDE[v.k]).pop();
 function lastSide(all, now) { // most recent breast side across all feeds
   for (const e of all) {
@@ -324,6 +349,7 @@ function openFeed(all, now) {
 function addEvent(v) {
   const now = Date.now(), open = openFeed(live(), now);
   v.t = now;
+  starting = false;
   if (open) commit(setEv(open, [...events(open), v]));
   else commit({ id: newId(), type: 'feed', t: now, ev: [v], note: '', by: cfg.name || '' });
 }
@@ -349,16 +375,26 @@ function render() {
       extra = '<div class="chips">' + COLORS.filter(c => by[c.id]).map(c =>
         `<span class="chip">${dot(c.id)}${esc(c.label)} × ${by[c.id]}</span>`).join('') + '</div>';
     }
-    let sides = '';
+    let sides = '', main = `<button class="add" data-add="${type}">+ ${TYPES[type]}</button>`;
     if (type === 'feed') {
       const open = openFeed(all, now), ls = lastSide(all, now), cur = open && lastSideOf(open);
-      if (last) sub = `${open ? 'Feeding now · started' : 'Last feed started'} ${fmtTime(last.t)} · ${ago(last.t)}<div class="what">${esc(feedText(last))}</div>`;
+      if (last) {
+        const d = durText(last, now, last === open);
+        sub = `${open ? 'Feeding now · started' : 'Last feed started'} ${fmtTime(last.t)} · ${ago(last.t)}`
+          + `<div class="what">${esc(feedText(last))}</div>${d ? `<div class="dur">${esc(d)}</div>` : ''}`;
+      }
       if (ls) sub += `<div class="next">Last side: ${SIDE[ls.k]} <span>started ${fmtTime(ls.t)} · ${ago(ls.t)}</span></div>`;
-      sides = '<div class="sides">' + ['left', 'right'].map(sd =>
-        cur && cur.k === sd ? `<button class="done" disabled>${SIDE[sd]} ✓ ${fmtTime(cur.t)}</button>`
-        : `<button data-side="${sd}">${cur ? 'Switch to' : open ? 'Add' : 'Start'} ${SIDE[sd]}</button>`).join('')
-        + `<button data-bottle>${open ? 'Add bottle' : 'Bottle'}</button></div>`
-        + (open ? '<div class="sides"><button class="done" data-finish>Finish this feed</button></div>' : '');
+      main = open ? '<button class="add stop" data-feedmain>Finish feed</button>'
+        : starting ? '<button class="add stop" data-feedmain>Cancel</button>'
+        : '<button class="add" data-feedmain>New feed</button>';
+      // the step buttons only appear once a feed is started or in progress
+      if (open || starting) sides = (open ? '' : '<div class="prompt">What does this feed start with?</div>')
+        + '<div class="sides">' + ['left', 'right'].map(sd =>
+          cur && cur.k === sd ? `<button class="done" disabled>${SIDE[sd]} ✓ ${fmtTime(cur.t)}</button>`
+          : `<button data-side="${sd}">${cur ? 'Switch to' : open ? 'Add' : 'Start'} ${SIDE[sd]}</button>`).join('')
+        + `<button data-bottle>${open ? 'Add bottle' : 'Bottle'}</button></div>`;
+      sides += open ? `<button class="link" data-edit="${esc(open.id)}">Correct this feed</button>`
+        : '<button class="link" data-add="feed">Add a missed feed</button>';
     }
     if (type === 'feed' && last) {
       const due = last.t + feedHours() * 3600000, left = due - now;
@@ -378,13 +414,14 @@ function render() {
     }
     return `<div class="card ${type}">
       <h2>${TYPES[type]}</h2>
-      <button class="add" data-add="${type}">+ ${TYPES[type]}</button>
+      ${main}
       <div class="count">${recent.length}<small>in last 24 hours</small></div>
       <div class="sub">${sub}${extra}</div>${sides}
     </div>`;
   });
   $('#cards').innerHTML = cards.join('');
 
+  const openNow = openFeed(all, now);
   const shown = all.filter(e => filter === 'all' || e.type === filter);
   if (!shown.length) {
     $('#history').innerHTML = '<div class="empty">No entries yet. Tap a button above to log one.</div>';
@@ -399,11 +436,15 @@ function render() {
         list.map(e => {
           let what = TYPES[e.type];
           if (e.type === 'poop') what = `${dot(e.color)}Poop · ${esc(COLOR[e.color]?.label || e.color)}`;
-          if (e.type === 'feed') what = `Feed · ${esc(feedText(e))}`;
+          let dur = '';
+          if (e.type === 'feed') {
+            what = `Feed · ${esc(feedText(e))}`;
+            dur = durText(e, now, e === openNow);
+          }
           return `<button class="row" data-edit="${esc(e.id)}">
             <span class="time">${fmtTime(e.t)}</span>
             <span><span class="what">${what}${e.by ? `<span class="by">${esc(e.by)}</span>` : ''}</span>
-            ${e.note ? `<div class="note">${esc(e.note)}</div>` : ''}</span>
+            ${dur ? `<div class="dur">${esc(dur)}</div>` : ''}${e.note ? `<div class="note">${esc(e.note)}</div>` : ''}</span>
           </button>`;
         }).join('') + '</div>';
     }).join('');
@@ -462,14 +503,18 @@ form.addEventListener('click', ev => {
 function openEntry(type, entry) {
   editing = entry || null; formType = type;
   form.reset();
-  $('#entryTitle').textContent = (entry ? 'Edit ' : 'Log ') + TYPES[type].toLowerCase();
+  $('#entryTitle').textContent = type === 'feed' ? (entry ? 'Correct feed' : 'Add a missed feed')
+    : (entry ? 'Edit ' : 'Log ') + TYPES[type].toLowerCase();
   $('#poopFields').hidden = type !== 'poop';
   $('#feedFields').hidden = type !== 'feed';
   $('#timeWrap').hidden = type === 'feed'; // a feed's time is its first line
   form.elements.time.value = toLocalInput(entry ? entry.t : Date.now());
   form.elements.note.value = entry?.note || '';
   if (type === 'poop') form.elements.color.value = entry?.color || 'yellow';
-  if (type === 'feed') { formEv = entry ? events(entry).map(v => ({ ...v })) : []; renderEv(); }
+  if (type === 'feed') {
+    formEv = entry ? events(entry).map(v => ({ ...v })) : []; renderEv();
+    form.elements.end.value = entry?.end ? toLocalInput(entry.end) : '';
+  }
   $('#delBtn').hidden = !entry;
   updateFormVisibility();
   dlg.showModal();
@@ -489,6 +534,14 @@ form.addEventListener('submit', ev => {
     if (Math.max(...ts) - Math.min(...ts) > 6 * 3600000) return alert('These times are more than 6 hours apart. Check the day on each line.');
     e = setEv(e, formEv);
     if (!editing) e.done = true; // logged after the fact, so nothing more will be added by tapping
+    if (form.elements.end.value) {
+      const lastStep = Math.max(...ts);
+      let end = new Date(form.elements.end.value).getTime();
+      if (end < lastStep - 59999) return alert('The feed cannot end before its last step.');
+      if (end - e.t > 6 * 3600000) return alert('The end is more than 6 hours after the start. Check the day.');
+      if (e.end && toLocalInput(end) === toLocalInput(e.end)) end = e.end; // keep the exact second unless edited
+      e.end = Math.max(end, lastStep); e.done = true;
+    } else if (e.end) { delete e.end; delete e.done; } // end removed: the feed can be continued
   } else {
     e.t = new Date(form.elements.time.value).getTime();
     if (!Number.isFinite(e.t)) return alert('Please pick a day and time.');
@@ -537,9 +590,10 @@ document.addEventListener('click', ev => {
   const sideBtn = ev.target.closest('[data-side]');
   if (sideBtn) return tapSide(sideBtn.dataset.side);
   if (ev.target.closest('[data-bottle]')) return openBottle();
-  if (ev.target.closest('[data-finish]')) {
+  if (ev.target.closest('[data-feedmain]')) {
     const open = openFeed(live(), Date.now());
-    if (open) commit({ ...open, done: true });
+    if (open) commit({ ...open, done: true, end: Date.now() }); // Finish feed
+    else { starting = !starting; render(); }                    // New feed / Cancel
     return;
   }
   const add = ev.target.closest('[data-add]');
