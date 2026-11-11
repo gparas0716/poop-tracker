@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Baby Log</title>
+<meta name="theme-color" content="#f6f1ea">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Baby Log">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+:root {
+  --bg: #f6f1ea; --card: #fffdfa; --ink: #2b2622; --muted: #7d736a; --line: #e6ddd2;
+  --poop: #8a5a33; --pee: #c99a12; --feed: #3f7f8c; --accent: #3f7f8c; --danger: #b3402f;
+  --warn-bg: #fdecd8; --warn-ink: #7a3d0c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1917; --card: #262320; --ink: #f1ebe4; --muted: #a2978c; --line: #3a3531;
+    --poop: #c99468; --pee: #e3bd4a; --feed: #7fbfcc; --accent: #7fbfcc; --danger: #e57a68;
+    --warn-bg: #4a3118; --warn-ink: #ffd9ad;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
+  max-width: 560px; margin: 0 auto;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 16px 0 8px; }
+h1 { font-size: 22px; margin: 0; }
+.status { font-size: 12px; color: var(--muted); }
+.icon-btn { background: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+
+.cards { display: grid; gap: 12px; margin-top: 8px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px;
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+}
+.card h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--muted); }
+.card .count { font-size: 34px; font-weight: 700; line-height: 1.1; }
+.card .count small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+.card .sub { font-size: 14px; color: var(--muted); grid-column: 1; }
+.card .add {
+  grid-column: 2; grid-row: 1 / span 3; border: 0; border-radius: 14px; color: #fff;
+  font-weight: 700; font-size: 16px; padding: 18px 16px; min-width: 104px;
+}
+.card.poop .add { background: var(--poop); } .card.poop .count { color: var(--poop); }
+.card.pee .add { background: var(--pee); }  .card.pee .count { color: var(--pee); }
+.card.feed .add { background: var(--feed); } .card.feed .count { color: var(--feed); }
+@media (prefers-color-scheme: dark) { .card .add { color: #1b1917; } }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px 2px 6px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(128,128,128,.5); display: inline-block; flex: none; }
+
+.tabs { display: flex; gap: 6px; margin: 22px 0 6px; }
+.tabs button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 7px 0; font-size: 14px; }
+.tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.day { margin-top: 16px; }
+.day-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); padding: 0 2px 6px; }
+.day-head b { color: var(--ink); font-size: 15px; }
+.row {
+  display: grid; grid-template-columns: 78px 1fr; gap: 10px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;
+}
+.row .time { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; padding-top: 1px; }
+.row .what { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.row .note { font-size: 14px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.row .by { font-weight: 400; font-size: 12px; color: var(--muted); }
+.empty { text-align: center; color: var(--muted); padding: 28px 0; }
+
+dialog {
+  border: 0; padding: 0; background: var(--card); color: var(--ink); width: 100%; max-width: 560px;
+  margin: auto auto 0; border-radius: 20px 20px 0 0; max-height: 92vh;
+}
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog form { padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); display: grid; gap: 14px; }
+dialog h3 { margin: 0; font-size: 19px; }
+label.f { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+input[type=text], input[type=url], input[type=datetime-local], textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 16px;
+}
+textarea { min-height: 70px; resize: vertical; }
+.seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg label { flex: 1; min-width: 88px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  border: 2px solid var(--line); border-radius: 12px; padding: 12px 8px; font-size: 15px; font-weight: 600; color: var(--ink);
+}
+.seg input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 9px 12px; font-size: 14px; }
+.actions { display: flex; gap: 8px; }
+.actions button { flex: 1; border-radius: 12px; padding: 14px; font-weight: 700; border: 1px solid var(--line); background: none; }
+.actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; flex: 2; }
+@media (prefers-color-scheme: dark) { .actions .primary { color: #1b1917; } }
+.actions .del { color: var(--danger); flex: 0 0 auto; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Baby Log</h1>
+    <div class="status" id="status"></div>
+  </div>
+  <button class="icon-btn" id="openSettings" aria-label="Settings">⚙︎ Settings</button>
+</header>
+
+<section class="cards" id="cards"></section>
+
+<nav class="tabs" id="tabs">
+  <button data-f="all" class="on">All</button>
+  <button data-f="poop">Poop</button>
+  <button data-f="pee">Pee</button>
+  <button data-f="feed">Feed</button>
+</nav>
+<section id="history"></section>
+
+<dialog id="entryDlg">
+  <form id="entryForm" method="dialog">
+    <h3 id="entryTitle"></h3>
+    <label class="f">Day and time
+      <input type="datetime-local" name="time" required>
+    </label>
+
+    <div id="poopFields">
+      <label class="f">Color</label>
+      <div class="seg" id="colorSeg"></div>
+      <div class="warn" id="colorWarn" hidden>Red, black (after the first few days) or white/pale poop is worth a call to your pediatrician.</div>
+    </div>
+
+    <div id="feedFields">
+      <label class="f">Side</label>
+      <div class="seg">
+        <label><input type="radio" name="side" value="left"><span>Left</span></label>
+        <label><input type="radio" name="side" value="right"><span>Right</span></label>
+        <label><input type="radio" name="side" value="both"><span>Both</span></label>
+      </div>
+      <div id="firstWrap" hidden style="margin-top:14px">
+        <label class="f">Which side first?</label>
+        <div class="seg">
+          <label><input type="radio" name="first" value="left"><span>Left first</span></label>
+          <label><input type="radio" name="first" value="right"><span>Right first</span></label>
+        </div>
+      </div>
+    </div>
+
+    <label class="f">Notes
+      <textarea name="note" placeholder="Optional"></textarea>
+    </label>
+    <div class="actions">
+      <button type="button" class="del" id="delBtn" hidden>Delete</button>
+      <button type="button" id="cancelBtn">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settingsDlg">
+  <form id="settingsForm" method="dialog">
+    <h3>Settings</h3>
+    <label class="f">Your name (shown on each entry)
+      <input type="text" name="name" placeholder="Mom, Dad…" maxlength="20">
+    </label>
+    <label class="f">Sync database URL (Firebase Realtime Database)
+      <input type="url" name="db" placeholder="https://your-project-default-rtdb.firebaseio.com" autocapitalize="off" autocorrect="off">
+    </label>
+    <p class="hint" id="syncHint"></p>
+    <div class="actions">
+      <button type="button" id="inviteBtn" hidden>Copy invite link</button>
+      <button type="button" id="settingsCancel">Close</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+'use strict';
+const COLORS = [
+  { id: 'yellow', label: 'Yellow', hex: '#e0b32b' },
+  { id: 'green',  label: 'Green',  hex: '#5b8c3a' },
+  { id: 'brown',  label: 'Brown',  hex: '#7a4e2b' },
+  { id: 'black',  label: 'Black',  hex: '#1d1b1a', warn: true },
+  { id: 'red',    label: 'Red',    hex: '#c0392b', warn: true },
+  { id: 'white',  label: 'White / pale', hex: '#ece7db', warn: true },
+];
+const COLOR = Object.fromEntries(COLORS.map(c => [c.id, c]));
+const TYPES = { poop: 'Poop', pee: 'Pee', feed: 'Feed' };
+const DAY = 24 * 60 * 60 * 1000;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- storage ---------- */
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+let entries = load('bt.entries', {});   // id -> entry (deleted ones kept as tombstones so deletes sync)
+let dirty = new Set(load('bt.dirty', [])); // ids not yet pushed
+let cfg = load('bt.cfg', { name: '', db: '', code: '' });
+let filter = 'all';
+let syncState = 'idle';
+const persist = () => { save('bt.entries', entries); save('bt.dirty', [...dirty]); };
+
+/* ---------- helpers ---------- */
+const pad = n => String(n).padStart(2, '0');
+const toLocalInput = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fmtTime = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const dayKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+function fmtDay(ms) {
+  const k = dayKey(ms), now = Date.now();
+  if (k === dayKey(now)) return 'Today';
+  if (k === dayKey(now - DAY)) return 'Yesterday';
+  return new Date(ms).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function ago(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 0) return 'in the future';
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ${m % 60}m ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+const cap = s => s[0].toUpperCase() + s.slice(1);
+const live = () => Object.values(entries).filter(e => !e.deleted).sort((a, b) => b.t - a.t);
+function feedText(e) {
+  if (e.side === 'both') return `Both — ${e.first || '?'} first`;
+  return cap(e.side || '?');
+}
+const dot = id => `<span class="dot" style="background:${COLOR[id]?.hex || '#999'}"></span>`;
+
+/* ---------- render ---------- */
+function render() {
+  const all = live(), now = Date.now();
+  const last24 = all.filter(e => e.t > now - DAY && e.t <= now);
+  const cards = Object.keys(TYPES).map(type => {
+    const recent = last24.filter(e => e.type === type);
+    const last = all.find(e => e.type === type && e.t <= now);
+    let sub = last ? `Last: ${ago(last.t)}` : 'Nothing logged yet';
+    let extra = '';
+    if (type === 'poop' && recent.length) {
+      const by = {};
+      recent.forEach(e => by[e.color] = (by[e.color] || 0) + 1);
+      extra = '<div class="chips">' + COLORS.filter(c => by[c.id]).map(c =>
+        `<span class="chip">${dot(c.id)}${esc(c.label)} × ${by[c.id]}</span>`).join('') + '</div>';
+    }
+    if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, ${ago(last.t)}`;
+    return `<div class="card ${type}">
+      <h2>${TYPES[type]}</h2>
+      <button class="add" data-add="${type}">+ ${TYPES[type]}</button>
+      <div class="count">${recent.length}<small>in last 24 hours</small></div>
+      <div class="sub">${sub}${extra}</div>
+    </div>`;
+  });
+  $('#cards').innerHTML = cards.join('');
+
+  const shown = all.filter(e => filter === 'all' || e.type === filter);
+  if (!shown.length) {
+    $('#history').innerHTML = '<div class="empty">No entries yet. Tap a button above to log one.</div>';
+  } else {
+    const days = new Map();
+    shown.forEach(e => { const k = dayKey(e.t); if (!days.has(k)) days.set(k, []); days.get(k).push(e); });
+    $('#history').innerHTML = [...days.values()].map(list => {
+      const n = t => list.filter(e => e.type === t).length;
+      const totals = Object.keys(TYPES).filter(t => filter === 'all' || filter === t)
+        .map(t => `${TYPES[t]} ${n(t)}`).join(' · ');
+      return `<div class="day"><div class="day-head"><b>${fmtDay(list[0].t)}</b><span>${totals}</span></div>` +
+        list.map(e => {
+          let what = TYPES[e.type];
+          if (e.type === 'poop') what = `${dot(e.color)}Poop · ${esc(COLOR[e.color]?.label || e.color)}`;
+          if (e.type === 'feed') what = `Feed · ${esc(feedText(e))}`;
+          return `<button class="row" data-edit="${esc(e.id)}">
+            <span class="time">${fmtTime(e.t)}</span>
+            <span><span class="what">${what}${e.by ? `<span class="by">${esc(e.by)}</span>` : ''}</span>
+            ${e.note ? `<div class="note">${esc(e.note)}</div>` : ''}</span>
+          </button>`;
+        }).join('') + '</div>';
+    }).join('');
+  }
+
+  const s = !cfg.db ? 'Saved on this phone only — set up sync in Settings'
+    : syncState === 'ok' ? 'Synced'
+    : syncState === 'syncing' ? 'Syncing…'
+    : `Not synced yet${dirty.size ? ` (${dirty.size} waiting)` : ''} — will retry`;
+  $('#status').textContent = s;
+}
+
+/* ---------- entry form ---------- */
+const form = $('#entryForm'), dlg = $('#entryDlg');
+let editing = null, formType = null;
+$('#colorSeg').innerHTML = COLORS.map(c =>
+  `<label><input type="radio" name="color" value="${c.id}"><span>${dot(c.id)}${c.label}</span></label>`).join('');
+
+function updateFormVisibility() {
+  const side = form.elements.side.value;
+  $('#firstWrap').hidden = side !== 'both';
+  $('#colorWarn').hidden = !COLOR[form.elements.color.value]?.warn;
+}
+form.addEventListener('change', updateFormVisibility);
+
+function openEntry(type, entry) {
+  editing = entry || null; formType = type;
+  form.reset();
+  $('#entryTitle').textContent = (entry ? 'Edit ' : 'Log ') + TYPES[type].toLowerCase();
+  $('#poopFields').hidden = type !== 'poop';
+  $('#feedFields').hidden = type !== 'feed';
+  form.elements.time.value = toLocalInput(entry ? entry.t : Date.now());
+  form.elements.note.value = entry?.note || '';
+  if (type === 'poop') form.elements.color.value = entry?.color || 'yellow';
+  if (type === 'feed') {
+    form.elements.side.value = entry?.side || '';
+    form.elements.first.value = entry?.first || '';
+  }
+  $('#delBtn').hidden = !entry;
+  updateFormVisibility();
+  dlg.showModal();
+}
+
+form.addEventListener('submit', ev => {
+  ev.preventDefault();
+  const t = new Date(form.elements.time.value).getTime();
+  if (!Number.isFinite(t)) return alert('Please pick a day and time.');
+  const e = editing ? { ...editing } : { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), type: formType };
+  e.t = t;
+  e.note = form.elements.note.value.trim();
+  if (formType === 'poop') e.color = form.elements.color.value;
+  if (formType === 'feed') {
+    e.side = form.elements.side.value;
+    if (!e.side) return alert('Pick left, right or both.');
+    if (e.side === 'both') {
+      e.first = form.elements.first.value;
+      if (!e.first) return alert('Pick which side was first.');
+    } else delete e.first;
+  }
+  if (!editing) e.by = cfg.name || '';
+  commit(e);
+  dlg.close();
+});
+$('#cancelBtn').onclick = () => dlg.close();
+$('#delBtn').onclick = () => {
+  if (!confirm('Delete this entry?')) return;
+  commit({ ...editing, deleted: true });
+  dlg.close();
+};
+function commit(e) {
+  e.updated = Date.now();
+  entries[e.id] = e;
+  dirty.add(e.id);
+  persist(); render(); push();
+}
+
+document.addEventListener('click', ev => {
+  const add = ev.target.closest('[data-add]');
+  if (add) return openEntry(add.dataset.add);
+  const row = ev.target.closest('[data-edit]');
+  if (row) { const e = entries[row.dataset.edit]; if (e) openEntry(e.type, e); return; }
+  const tab = ev.target.closest('#tabs button');
+  if (tab) {
+    filter = tab.dataset.f;
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === tab));
+    render();
+  }
+});
+
+/* ---------- sync (Firebase Realtime Database REST API, last-write-wins per entry) ---------- */
+const base = () => cfg.db.replace(/\/+$/, '') + '/families/' + encodeURIComponent(cfg.code);
+const setSync = s => { syncState = s; render(); };
+let pushing = false, stream = null, pullTimer = null;
+
+async function push() {
+  if (!cfg.db || pushing || !dirty.size) return;
+  pushing = true; setSync('syncing');
+  try {
+    for (const id of [...dirty]) {
+      const sent = entries[id];
+      const r = await fetch(`${base()}/entries/${id}.json`, { method: 'PUT', body: JSON.stringify(sent) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (entries[id] === sent) dirty.delete(id); // unchanged while in flight
+      persist();
+    }
+    setSync('ok');
+  } catch (err) { console.warn('push failed', err); setSync('error'); }
+  pushing = false;
+  if (dirty.size && syncState === 'ok') push();
+}
+
+async function pull() {
+  if (!cfg.db) return;
+  try {
+    const r = await fetch(`${base()}/entries.json`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const remote = (await r.json()) || {};
+    for (const [id, re] of Object.entries(remote)) {
+      if (!re || typeof re !== 'object' || !TYPES[re.type]) continue;
+      const le = entries[id];
+      if (!le || (re.updated || 0) > (le.updated || 0)) { entries[id] = { ...re, id }; dirty.delete(id); }
+    }
+    for (const id of Object.keys(entries)) if (!remote[id]) dirty.add(id);
+    persist();
+    setSync(dirty.size ? 'syncing' : 'ok');
+    push();
+  } catch (err) { console.warn('pull failed', err); setSync('error'); }
+}
+const schedulePull = () => { clearTimeout(pullTimer); pullTimer = setTimeout(pull, 300); };
+
+function connect() {
+  if (stream) { stream.close(); stream = null; }
+  if (!cfg.db) return render();
+  pull();
+  try { // live updates from the other phone
+    stream = new EventSource(`${base()}/entries.json`);
+    stream.addEventListener('put', schedulePull);
+    stream.addEventListener('patch', schedulePull);
+  } catch {}
+}
+window.addEventListener('online', pull);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); pull(); } });
+setInterval(render, 60000);
+setInterval(() => { if (!document.hidden && syncState === 'error') pull(); }, 30000);
+
+/* ---------- settings + invite link ---------- */
+const sForm = $('#settingsForm'), sDlg = $('#settingsDlg');
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 24);
+const inviteLink = () => location.origin + location.pathname + '#join=' + btoa(JSON.stringify({ db: cfg.db, code: cfg.code }));
+function showSettings() {
+  sForm.elements.name.value = cfg.name;
+  sForm.elements.db.value = cfg.db;
+  $('#inviteBtn').hidden = !cfg.db;
+  $('#syncHint').textContent = cfg.db
+    ? 'Sync is on. Send the invite link to the other phone — opening it connects that phone to the same log.'
+    : 'Leave empty to keep the log on this phone only. See the README for the 5-minute sync setup.';
+  sDlg.showModal();
+}
+$('#openSettings').onclick = showSettings;
+$('#settingsCancel').onclick = () => sDlg.close();
+sForm.addEventListener('submit', ev => {
+  ev.preventDefault();
+  const db = sForm.elements.db.value.trim();
+  if (db && !/^https:\/\/[^/]+/.test(db)) return alert('The database URL should start with https://');
+  const changed = db !== cfg.db;
+  cfg.name = sForm.elements.name.value.trim();
+  cfg.db = db;
+  if (db && !cfg.code) cfg.code = newCode();
+  save('bt.cfg', cfg);
+  sDlg.close();
+  if (changed) { syncState = 'idle'; connect(); } else render();
+});
+$('#inviteBtn').onclick = async () => {
+  const url = inviteLink();
+  try {
+    if (navigator.share) await navigator.share({ title: 'Baby Log', url });
+    else { await navigator.clipboard.writeText(url); alert('Invite link copied. Send it to the other phone.'); }
+  } catch { prompt('Copy this link and send it to the other phone:', url); }
+};
+function handleJoin() {
+  const m = location.hash.match(/^#join=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const j = JSON.parse(atob(m[1]));
+    if (!/^https:\/\//.test(j.db) || !j.code) throw 0;
+    if (cfg.db === j.db && cfg.code === j.code) return;
+    if (!confirm('Connect this phone to the shared baby log?')) return;
+    cfg.db = j.db; cfg.code = String(j.code);
+    save('bt.cfg', cfg);
+  } catch { alert('That invite link is not valid.'); }
+}
+
+handleJoin();
+render();
+connect();
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
