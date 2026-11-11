@@ -157,11 +157,18 @@ textarea { min-height: 70px; resize: vertical; }
         </div>
       </div>
       <label class="check" style="margin-top:14px">
-        <input type="checkbox" name="formula"> <span>Formula</span>
+        <input type="checkbox" name="bottle"> <span>Bottle</span>
       </label>
-      <label class="f" id="ozWrap" hidden style="margin-top:10px">How many oz?
-        <input type="number" name="oz" inputmode="decimal" min="0.25" max="20" step="0.25" placeholder="e.g. 2.5">
-      </label>
+      <div id="bottleWrap" hidden style="margin-top:10px">
+        <label class="f">What was in the bottle?</label>
+        <div class="seg">
+          <label><input type="radio" name="btype" value="formula"><span>Formula</span></label>
+          <label><input type="radio" name="btype" value="milk"><span>Breast milk</span></label>
+        </div>
+        <label class="f" style="margin-top:14px">How many oz?
+          <input type="number" name="oz" inputmode="decimal" min="0.25" max="20" step="0.25" placeholder="e.g. 2.5">
+        </label>
+      </div>
     </div>
 
     <label class="f">Notes
@@ -241,12 +248,16 @@ function ago(ms) {
 }
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const live = () => Object.values(entries).filter(e => !e.deleted).sort((a, b) => b.t - a.t);
+const BOTTLE = { formula: 'Formula', milk: 'Breast milk' };
+// entries saved before bottle types existed only have `formula: true`
+const bottleOf = e => BOTTLE[e.bottle] ? e.bottle : e.formula ? 'formula' : '';
 const fmtOz = n => `${Math.round(n * 100) / 100} oz`;
 function feedText(e) {
   const parts = [];
   if (e.side === 'both') parts.push(`Both — ${e.first || '?'} first`);
   else if (e.side && e.side !== 'none') parts.push(cap(e.side));
-  if (e.formula) parts.push(`Formula ${fmtOz(e.oz || 0)}`);
+  const b = bottleOf(e);
+  if (b) parts.push(`${BOTTLE[b]} ${fmtOz(e.oz || 0)}`);
   return parts.join(' + ') || '?';
 }
 const dot = id => `<span class="dot" style="background:${COLOR[id]?.hex || '#999'}"></span>`;
@@ -268,8 +279,11 @@ function render() {
     }
     if (type === 'feed' && last) sub = `Last: ${esc(feedText(last))}, ${ago(last.t)}`;
     if (type === 'feed') {
-      const oz = recent.reduce((n, e) => n + (e.formula ? Number(e.oz) || 0 : 0), 0);
-      if (oz) extra = `<div class="chips"><span class="chip" style="padding-left:9px">Formula ${fmtOz(oz)} in last 24 hours</span></div>`;
+      const oz = {};
+      recent.forEach(e => { const b = bottleOf(e); if (b) oz[b] = (oz[b] || 0) + (Number(e.oz) || 0); });
+      const chips = Object.keys(BOTTLE).filter(b => oz[b]).map(b =>
+        `<span class="chip" style="padding-left:9px">${BOTTLE[b]} ${fmtOz(oz[b])}</span>`);
+      if (chips.length) extra = `<div class="chips">${chips.join('')}</div>`;
     }
     return `<div class="card ${type}">
       <h2>${TYPES[type]}</h2>
@@ -320,7 +334,7 @@ $('#colorSeg').innerHTML = COLORS.map(c =>
 function updateFormVisibility() {
   const side = form.elements.side.value;
   $('#firstWrap').hidden = side !== 'both';
-  $('#ozWrap').hidden = !form.elements.formula.checked;
+  $('#bottleWrap').hidden = !form.elements.bottle.checked;
   $('#colorWarn').hidden = !COLOR[form.elements.color.value]?.warn;
 }
 form.addEventListener('change', updateFormVisibility);
@@ -337,8 +351,10 @@ function openEntry(type, entry) {
   if (type === 'feed') {
     form.elements.side.value = entry?.side || '';
     form.elements.first.value = entry?.first || '';
-    form.elements.formula.checked = !!entry?.formula;
-    form.elements.oz.value = entry?.formula ? entry.oz : '';
+    const b = entry ? bottleOf(entry) : '';
+    form.elements.bottle.checked = !!b;
+    form.elements.btype.value = b;
+    form.elements.oz.value = b ? entry.oz : '';
   }
   $('#delBtn').hidden = !entry;
   updateFormVisibility();
@@ -356,13 +372,15 @@ form.addEventListener('submit', ev => {
   if (formType === 'feed') {
     e.side = form.elements.side.value;
     if (!e.side) return alert('Pick left, right, both or no breast.');
-    if (form.elements.formula.checked) {
+    delete e.formula;
+    if (form.elements.bottle.checked) {
       const oz = Number(form.elements.oz.value);
-      if (!(oz > 0 && oz <= 20)) return alert('Enter how many oz of formula (up to 20).');
-      e.formula = true; e.oz = oz;
+      if (!form.elements.btype.value) return alert('Pick formula or breast milk for the bottle.');
+      if (!(oz > 0 && oz <= 20)) return alert('Enter how many oz were in the bottle (up to 20).');
+      e.bottle = form.elements.btype.value; e.oz = oz;
     } else {
-      if (e.side === 'none') return alert('Pick a side, or tick Formula.');
-      delete e.formula; delete e.oz;
+      if (e.side === 'none') return alert('Pick a side, or tick Bottle.');
+      delete e.bottle; delete e.oz;
     }
     if (e.side === 'both') {
       e.first = form.elements.first.value;
