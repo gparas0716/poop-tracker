@@ -12,6 +12,8 @@ A small phone-friendly web app for two parents to log a baby's poop, pee and fee
   it started, without an end time. **Correct this feed** and **Add a missed feed** open the full form.
 - **Next feed** — the feed card shows when the next feed is due: 3 hours after the first step of the last feed.
   The interval can be changed in Settings and is shared by both phones.
+- **Feeding summary** — the Feed tab shows totals for the last 24 hours, 3 days and 7 days: feeds, time feeding,
+  time on each side and on the bottle, and bottle amounts.
 - History grouped by day with per-day totals. Tap any entry to edit or delete it.
 - Works offline; entries sync when the phone is back online.
 
