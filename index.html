@@ -203,7 +203,7 @@ textarea { min-height: 70px; resize: vertical; }
 
 <dialog id="bottleDlg">
   <form id="bottleForm" method="dialog">
-    <h3>Bottle</h3>
+    <h3>How much did the baby drink?</h3>
     <div class="seg">
       <label><input type="radio" name="b" value="formula"><span>Formula</span></label>
       <label><input type="radio" name="b" value="milk"><span>Breast milk</span></label>
@@ -218,7 +218,8 @@ textarea { min-height: 70px; resize: vertical; }
     </div>
     <p class="hint" id="bottleHint"></p>
     <div class="actions">
-      <button type="button" id="bottleCancel">Cancel</button>
+      <button type="button" id="bottleCancel">Back</button>
+      <button type="button" id="bottleSkip">Skip</button>
       <button type="submit" class="primary">Save</button>
     </div>
   </form>
@@ -314,6 +315,7 @@ const toMl = v => (v.ml != null ? Number(v.ml) || 0 : (Number(v.oz) || 0) * ML_P
 const fmtMl = ml => (unit() === 'ml' ? `${Math.round(ml)} ml` : `${Math.round(ml / ML_PER_OZ * 100) / 100} oz`);
 const entered = v => (v.ml != null ? { n: v.ml, u: 'ml' } : { n: v.oz, u: 'oz' });
 function setAmt(v, n, u) { delete v.oz; delete v.ml; v[u === 'ml' ? 'ml' : 'oz'] = n; return v; }
+const hasAmt = v => entered(v).n > 0;
 const amtOk = v => { const a = entered(v); return a.n > 0 && a.n <= UNITS[a.u]; };
 const other = side => (side === 'left' ? 'right' : 'left');
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -337,7 +339,7 @@ function setEv(e, ev) { // store events in time order and drop the fields earlie
   return n;
 }
 const STEP = { pause: 'Paused', resume: 'Resumed' };
-const evLabel = v => (STEP[v.k] ? STEP[v.k] : v.k === 'bottle' ? `${BOTTLE[v.b] || 'Bottle'} ${fmtMl(toMl(v))}` : SIDE[v.k] || '?');
+const evLabel = v => (STEP[v.k] ? STEP[v.k] : v.k === 'bottle' ? (hasAmt(v) ? `${BOTTLE[v.b] || 'Bottle'} ${fmtMl(toMl(v))}` : BOTTLE[v.b] ? `${BOTTLE[v.b]} (no amount)` : 'Bottle') : SIDE[v.k] || '?');
 function feedText(e) {
   const ev = events(e).filter(v => !STEP[v.k]);
   if (ev.length < 2) return ev.length ? evLabel(ev[0]) : '?';
@@ -428,6 +430,8 @@ function addEvent(v) {
 function tapSide(side) {
   const open = openFeed(live(), Date.now());
   if (open && lastPartOf(open)?.k === side) return; // already on this side
+  const bottle = bottleOpen(open);
+  if (bottle) return askAmount({ side }, bottle);
   addEvent({ k: side });
 }
 const dot = id => `<span class="dot" style="background:${COLOR[id]?.hex || '#999'}"></span>`;
@@ -469,7 +473,8 @@ function render() {
         + '<div class="sides">' + ['left', 'right'].map(sd =>
           cur && cur.k === sd ? `<button class="done" disabled>${SIDE[sd]} ✓ ${fmtTime(cur.t)}</button>`
           : `<button data-side="${sd}">${cur && SIDE[cur.k] ? 'Switch to' : cur ? 'Back to' : open ? 'Add' : 'Start'} ${SIDE[sd]}</button>`).join('')
-        + `<button data-bottle>${open ? 'Add bottle' : 'Bottle'}</button></div>`;
+        + (cur && cur.k === 'bottle' ? `<button class="done" disabled>Bottle ✓ ${fmtTime(cur.t)}</button>`
+          : `<button data-bottle>${open ? 'Start bottle' : 'Bottle'}</button>`) + '</div>';
       sides += open ? `<button class="link" data-edit="${esc(open.id)}">Correct this feed</button>`
         : '<button class="link" data-add="feed">Add a missed feed</button>';
     }
@@ -483,7 +488,7 @@ function render() {
     if (type === 'feed') {
       const oz = {};
       all.forEach(e => e.type === 'feed' && events(e).forEach(v => {
-        if (v.k === 'bottle' && v.t > now - DAY && v.t <= now) oz[v.b] = (oz[v.b] || 0) + toMl(v);
+        if (v.k === 'bottle' && BOTTLE[v.b] && v.t > now - DAY && v.t <= now) oz[v.b] = (oz[v.b] || 0) + toMl(v);
       }));
       const chips = Object.keys(BOTTLE).filter(b => oz[b]).map(b =>
         `<span class="chip" style="padding-left:9px">${BOTTLE[b]} ${fmtMl(oz[b])}</span>`);
@@ -552,7 +557,7 @@ function renderEv() {
       ${v.k === 'bottle' ? `<div class="ev-bottle"><select data-f="b">${Object.keys(BOTTLE).map(b =>
         `<option value="${b}"${v.b === b ? ' selected' : ''}>${BOTTLE[b]}</option>`).join('')}</select>
         <input type="number" data-f="amt" inputmode="decimal" min="0" step="any" value="${entered(v).n || ''}">
-        <select data-f="unit">${Object.keys(UNITS).map(u => `<option${entered(v).u === u ? ' selected' : ''}>${u}</option>`).join('')}</select></div>` : ''}
+        <select data-f="unit">${Object.keys(UNITS).map(u => `<option${(hasAmt(v) ? entered(v).u : unit()) === u ? ' selected' : ''}>${u}</option>`).join('')}</select></div>` : ''}
       <input type="datetime-local" data-f="t" value="${Number.isFinite(v.t) ? toLocalInput(v.t) : ''}">
     </div>`).join('') || '<p class="hint">Nothing added yet. Use the buttons below.</p>';
 }
@@ -606,7 +611,7 @@ form.addEventListener('submit', ev => {
     if (!formEv.length) return alert('Add at least one side or a bottle.');
     for (const v of formEv) {
       if (!Number.isFinite(v.t)) return alert('Every line needs a day and time.');
-      if (v.k === 'bottle' && !amtOk(v)) return alert('Enter how much was in the bottle (up to 20 oz or 600 ml).');
+      if (v.k === 'bottle' && hasAmt(v) && !amtOk(v)) return alert('That bottle amount is too large (up to 20 oz or 600 ml).');
     }
     const ts = formEv.map(v => v.t);
     if (Math.max(...ts) - Math.min(...ts) > 6 * 3600000) return alert('These times are more than 6 hours apart. Check the day on each line.');
@@ -631,27 +636,48 @@ form.addEventListener('submit', ev => {
   dlg.close();
 });
 
-/* ---------- quick bottle ---------- */
+/* ---------- bottles ----------
+   A bottle starts with one tap and no amount, so its clock runs from the start. The amount is asked
+   when the bottle ends: when a side is tapped or the feed is finished. */
 const bDlg = $('#bottleDlg'), bForm = $('#bottleForm');
-function openBottle() {
-  bForm.reset();
-  bForm.elements.b.value = load('bt.bottle', 'formula');
-  bForm.elements.unit.value = unit();
+let afterBottle = null; // what was tapped to end the bottle: { side } or { finish }, with the time of the tap
+const bottleOpen = open => { const v = open && lastPartOf(open); return v && v.k === 'bottle' && !hasAmt(v) ? v : null; };
+function startBottle() {
   const open = openFeed(live(), Date.now());
-  $('#bottleHint').textContent = open ? `Adds to the feed that started at ${fmtTime(open.t)}.` : 'Starts a new feed now.';
+  if (open && lastPartOf(open)?.k === 'bottle') return; // already on a bottle
+  addEvent({ k: 'bottle', seg: 1 });
+}
+function askAmount(action, bottle) {
+  afterBottle = { ...action, at: Date.now() };
+  bForm.reset();
+  bForm.elements.b.value = BOTTLE[bottle.b] ? bottle.b : load('bt.bottle', 'formula');
+  bForm.elements.unit.value = unit();
+  $('#bottleHint').textContent = `Bottle started at ${fmtTime(bottle.t)}.`;
   bDlg.showModal();
+}
+function endBottle(vals) { // fill in the bottle (unless skipped), then do what was tapped
+  const a = afterBottle, open = openFeed(live(), Date.now());
+  afterBottle = null; bDlg.close();
+  if (!a || !open) return;
+  const ev = events(open).map(v => ({ ...v })), bottle = ev.filter(isPart).pop();
+  if (vals && bottle && bottle.k === 'bottle') { bottle.b = vals.b; setAmt(bottle, vals.n, vals.u); }
+  if (a.side) ev.push({ k: a.side, t: a.at });
+  const e = setEv(open, ev);
+  if (a.finish) { e.done = true; e.end = a.at; }
+  commit(e);
 }
 bForm.addEventListener('submit', ev => {
   ev.preventDefault();
-  const b = bForm.elements.b.value, v = setAmt({ k: 'bottle', b, seg: 1 }, Number(bForm.elements.amt.value), bForm.elements.unit.value);
+  const b = bForm.elements.b.value, n = Number(bForm.elements.amt.value), u = bForm.elements.unit.value;
   if (!BOTTLE[b]) return alert('Pick formula or breast milk.');
-  if (!amtOk(v)) return alert('Enter how much (up to 20 oz or 600 ml).');
+  if (!amtOk(setAmt({}, n, u))) return alert('Enter how much (up to 20 oz or 600 ml), or tap Skip.');
   save('bt.bottle', b);
-  cfg.unit = entered(v).u; save('bt.cfg', cfg); // the unit you last used is the one this phone shows
-  addEvent(v);
-  bDlg.close();
+  cfg.unit = u; save('bt.cfg', cfg); // the unit you last used is the one this phone shows
+  endBottle({ b, n, u });
 });
-$('#bottleCancel').onclick = () => bDlg.close();
+$('#bottleSkip').onclick = () => endBottle(null);
+$('#bottleCancel').onclick = () => { afterBottle = null; bDlg.close(); }; // keep timing the bottle
+bDlg.addEventListener('cancel', () => { afterBottle = null; });
 
 $('#cancelBtn').onclick = () => dlg.close();
 $('#delBtn').onclick = () => {
@@ -669,7 +695,7 @@ function commit(e) {
 document.addEventListener('click', ev => {
   const sideBtn = ev.target.closest('[data-side]');
   if (sideBtn) return tapSide(sideBtn.dataset.side);
-  if (ev.target.closest('[data-bottle]')) return openBottle();
+  if (ev.target.closest('[data-bottle]')) return startBottle();
   if (ev.target.closest('[data-pause]')) {
     const open = openFeed(live(), Date.now());
     if (open) addEvent({ k: feedCalc(open, Date.now(), true).paused ? 'resume' : 'pause' });
@@ -677,7 +703,8 @@ document.addEventListener('click', ev => {
   }
   if (ev.target.closest('[data-feedmain]')) {
     const open = openFeed(live(), Date.now());
-    if (open) commit({ ...open, done: true, end: Date.now() }); // Finish feed
+    if (bottleOpen(open)) askAmount({ finish: true }, bottleOpen(open));
+    else if (open) commit({ ...open, done: true, end: Date.now() }); // Finish feed
     else { starting = !starting; render(); }                    // New feed / Cancel
     return;
   }
