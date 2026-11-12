@@ -344,14 +344,18 @@ function feedText(e) {
   return ev.map(v => `${evLabel(v)} ${fmtTime(v.t)}`).join(' → ');
 }
 const mins = ms => `${Math.round(ms / 60000)} min`;
-// Work out a feed's minutes. A side runs until the other side starts (a bottle does not end it) and the
-// last side until the feed's end: the recorded end, or "now" while in progress. Time between a pause and
+// Work out a feed's minutes. The feed is a chain of timed parts: left, right and bottle. Each part runs
+// until the next part starts, and the last one until the feed's end: the recorded end, or "now" while in
+// progress. Bottles saved before bottles were timed (no `seg` flag) are amounts only and end nothing. Time between a pause and
 // the next resume (or side) is left out of every figure.
+const PART = { ...SIDE, bottle: 'Bottle' };
+const isPart = v => !!SIDE[v.k] || (v.k === 'bottle' && !!v.seg);
+const lastPartOf = e => events(e).filter(isPart).pop();
 function feedCalc(e, now, isOpen) {
   const ev = events(e), end = e.end || (isOpen ? now : null), per = {};
   let cur = null, paused = false, total = 0, pausedMs = 0, curRun = 0, unknown = false;
   ev.forEach((v, i) => {
-    if (SIDE[v.k]) { if (v.k !== cur) curRun = 0; cur = v.k; paused = false; }
+    if (isPart(v)) { if (v.k !== cur) curRun = 0; cur = v.k; paused = false; }
     else if (v.k === 'pause') paused = true;
     else if (v.k === 'resume') paused = false;
     const stop = ev[i + 1] ? ev[i + 1].t : end;
@@ -365,7 +369,7 @@ function feedCalc(e, now, isOpen) {
 function durText(e, now, isOpen) {
   const c = feedCalc(e, now, isOpen), parts = [];
   if (c.total != null) parts.push(`Total ${mins(c.total)}`);
-  for (const k in SIDE) if (c.per[k] != null) parts.push(`${SIDE[k]} ${mins(c.per[k])}`);
+  for (const k in PART) if (c.per[k] != null) parts.push(`${PART[k]} ${mins(c.per[k])}`);
   if (c.pausedMs >= 30000) parts.push(`paused ${mins(c.pausedMs)}`);
   if (!parts.length && !c.unknown) return '';
   return parts.join(' · ') + (isOpen ? (c.paused ? ' · paused now' : ' so far') : '') + (c.unknown ? `${parts.length ? ' · ' : ''}end of feed not recorded` : '');
@@ -382,7 +386,7 @@ function timers(all, now) {
   const open = openFeed(all, now), last = all.find(e => e.type === 'feed' && e.t <= now), t = {};
   if (open) {
     const c = feedCalc(open, now, true);
-    t.label = c.paused ? 'Paused' : c.cur ? SIDE[c.cur] : 'This feed';
+    t.label = c.paused ? 'Paused' : c.cur ? PART[c.cur] : 'This feed';
     t.side = clock(c.cur ? c.curRun : c.total);
     t.total = c.cur ? `Total ${clock(c.total)}` : '';
     t.paused = c.paused;
@@ -423,7 +427,7 @@ function addEvent(v) {
 }
 function tapSide(side) {
   const open = openFeed(live(), Date.now());
-  if (open && lastSideOf(open)?.k === side) return; // already on this side
+  if (open && lastPartOf(open)?.k === side) return; // already on this side
   addEvent({ k: side });
 }
 const dot = id => `<span class="dot" style="background:${COLOR[id]?.hex || '#999'}"></span>`;
@@ -445,7 +449,7 @@ function render() {
     }
     let sides = '', main = `<button class="add" data-add="${type}">+ ${TYPES[type]}</button>`;
     if (type === 'feed') {
-      const open = openFeed(all, now), ls = lastSide(all, now), cur = open && lastSideOf(open);
+      const open = openFeed(all, now), ls = lastSide(all, now), cur = open && lastPartOf(open);
       if (last) {
         const d = durText(last, now, last === open);
         sub = `${open ? 'Feeding now · started' : 'Last feed started'} ${fmtTime(last.t)} · ${ago(last.t)}`
@@ -464,7 +468,7 @@ function render() {
       if (open || starting) sides = (open ? '' : '<div class="prompt">What does this feed start with?</div>')
         + '<div class="sides">' + ['left', 'right'].map(sd =>
           cur && cur.k === sd ? `<button class="done" disabled>${SIDE[sd]} ✓ ${fmtTime(cur.t)}</button>`
-          : `<button data-side="${sd}">${cur ? 'Switch to' : open ? 'Add' : 'Start'} ${SIDE[sd]}</button>`).join('')
+          : `<button data-side="${sd}">${cur && SIDE[cur.k] ? 'Switch to' : cur ? 'Back to' : open ? 'Add' : 'Start'} ${SIDE[sd]}</button>`).join('')
         + `<button data-bottle>${open ? 'Add bottle' : 'Bottle'}</button></div>`;
       sides += open ? `<button class="link" data-edit="${esc(open.id)}">Correct this feed</button>`
         : '<button class="link" data-add="feed">Add a missed feed</button>';
@@ -568,7 +572,7 @@ form.addEventListener('click', ev => {
   else {
     const prev = formEv.length ? formEv[formEv.length - 1].t : NaN;
     const v = { k: add.dataset.evadd, t: Number.isFinite(prev) ? prev : Date.now() };
-    if (v.k === 'bottle') { v.b = load('bt.bottle', 'formula'); setAmt(v, 0, unit()); }
+    if (v.k === 'bottle') { v.b = load('bt.bottle', 'formula'); v.seg = 1; setAmt(v, 0, unit()); }
     formEv.push(v);
   }
   renderEv();
@@ -639,7 +643,7 @@ function openBottle() {
 }
 bForm.addEventListener('submit', ev => {
   ev.preventDefault();
-  const b = bForm.elements.b.value, v = setAmt({ k: 'bottle', b }, Number(bForm.elements.amt.value), bForm.elements.unit.value);
+  const b = bForm.elements.b.value, v = setAmt({ k: 'bottle', b, seg: 1 }, Number(bForm.elements.amt.value), bForm.elements.unit.value);
   if (!BOTTLE[b]) return alert('Pick formula or breast milk.');
   if (!amtOk(v)) return alert('Enter how much (up to 20 oz or 600 ml).');
   save('bt.bottle', b);
